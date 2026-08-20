@@ -95,8 +95,8 @@ html, body {
 .panel .bad { color: var(--bad); }
 .panel h4 { font-size: 12px; color: var(--dim); letter-spacing: 1.5px; margin-bottom: 4px; }
 
-#hud-mission { top: 14px; left: 14px; max-width: 285px; }
-#hud-wind { top: 205px; left: 14px; width: 196px; text-align: center; }
+#hud-mission { top: 14px; left: 14px; max-width: 285px; max-height: 226px; overflow: hidden; }
+#hud-wind { top: 252px; left: 14px; width: 196px; text-align: center; }
 #wind-canvas { display: block; margin: 4px auto 2px; }
 #wind-history { display: block; margin: 2px auto 0; }
 #wind-digital { font-size: 15px; font-weight: 700; color: #eaf6ec; letter-spacing: 1px; }
@@ -156,3 +156,76 @@ html, body {
 #result-stats td:first-child { color: var(--dim); }
 #result-stats td:last-child { text-align: right; color: #eaf6ec; font-weight: 600; }
 .result-btns { margin-top: 30px; display: flex; gap: 14px; justify-content: center; }
+
+/* ===== 고정 비율 스테이지 (1440x900 논리 해상도, 레터박스 스케일) ===== */
+#game { background: #050706; }
+#stage {
+  position: absolute; left: 50%; top: 50%;
+  width: 1440px; height: 900px;
+  transform-origin: center center;
+  /* JS가 scale 설정 */
+}
+#stage .hud { position: absolute; }
+#stage #scope-canvas { position: absolute; inset: 0; width: 1440px; height: 900px; }
+
+/* ===== 총기/탄약 아이콘 그리드 ===== */
+.icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.icon-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px; cursor: pointer; text-align: center;
+  transition: border-color .15s, transform .15s;
+}
+.icon-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.icon-card canvas { display: block; margin: 0 auto 10px; }
+.icon-card h3 { font-size: 15.5px; color: #eaf6ec; margin-bottom: 2px; }
+.icon-card .sub { font-size: 12px; color: var(--accent); }
+
+/* ===== 상세 패널 ===== */
+.detail-pane {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 26px 30px; max-width: 640px; margin: 0 auto;
+}
+.detail-pane canvas { display: block; margin: 6px auto 18px; }
+.detail-pane h3 { font-size: 22px; color: #eaf6ec; }
+.detail-pane .sub { color: var(--accent); font-size: 13.5px; margin-bottom: 14px; }
+.detail-pane .desc { font-size: 13.5px; line-height: 1.75; margin-bottom: 14px; }
+.detail-pane .specs { font-size: 12px; color: var(--dim); line-height: 1.8; margin-bottom: 6px; }
+.detail-pane .src { font-size: 11px; color: #5a6f60; }
+.detail-pane .src a { color: #6f9c7c; }
+.detail-btns { display: flex; gap: 12px; margin-top: 20px; }
+.detail-btns .btn-primary, .detail-btns .btn-back { margin-top: 0; }
+
+/* ===== 모바일 터치 바 ===== */
+#touch-bar {
+  position: fixed; inset: 0; z-index: 20; pointer-events: none;
+}
+#touch-bar .tc-left {
+  position: absolute; left: 10px; bottom: 12px; display: flex;
+  flex-direction: column; gap: 8px; pointer-events: none;
+}
+#touch-bar .tc-row { display: flex; gap: 8px; }
+#touch-bar .tc-right {
+  position: absolute; right: 12px; bottom: 14px; display: flex;
+  align-items: flex-end; gap: 12px; pointer-events: none;
+}
+.tc-btn {
+  pointer-events: auto;
+  min-width: 58px; min-height: 58px;
+  background: rgba(12, 20, 14, 0.72); color: #d9ecd9;
+  border: 1.5px solid #3d5244; border-radius: 12px;
+  font-size: 12px; line-height: 1.25; font-weight: 600;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.tc-btn:active { background: rgba(60, 90, 60, 0.8); border-color: var(--accent); }
+.tc-btn.sm { min-height: 42px; min-width: 58px; font-size: 11px; }
+.tc-btn.fire {
+  width: 88px; height: 88px; border-radius: 50%;
+  background: rgba(120, 30, 22, 0.75); border-color: #e05c4a;
+  font-size: 16px; font-weight: 800; color: #ffe3dd;
+}
+.tc-btn.fire:active { background: rgba(190, 50, 35, 0.9); }
+.tc-btn.hold {
+  width: 68px; height: 68px; border-radius: 50%;
+  background: rgba(20, 50, 70, 0.7); border-color: #4fb7d1; color: #d8f0f8;
+}
+.tc-btn.hold:active, .tc-btn.hold.on { background: rgba(40, 100, 140, 0.9); }

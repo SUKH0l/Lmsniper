@@ -14,17 +14,27 @@
     <h1 class="logo">LM<span>SNIPER</span></h1>
     <p class="tagline">외부탄도학 기반 원거리 저격 시뮬레이터</p>
 
-    <!-- 단계 1: 총기 선택 -->
+    <!-- 단계 1: 총기 선택 (이미지+이름 그리드) -->
     <section id="step-rifle" class="menu-step">
       <h2>1. 총기 선택</h2>
-      <div id="rifle-list" class="card-list"></div>
+      <div id="rifle-list" class="icon-grid"></div>
     </section>
 
-    <!-- 단계 2: 탄종 선택 -->
+    <!-- 단계 1-b: 총기 상세 -->
+    <section id="step-rifleDetail" class="menu-step hidden">
+      <div id="rifle-detail" class="detail-pane"></div>
+    </section>
+
+    <!-- 단계 2: 탄종 선택 (이미지+이름 그리드) -->
     <section id="step-ammo" class="menu-step hidden">
       <h2>2. 탄종 선택</h2>
-      <div id="ammo-list" class="card-list"></div>
+      <div id="ammo-list" class="icon-grid"></div>
       <button class="btn-back" data-back="rifle">← 총기 다시 선택</button>
+    </section>
+
+    <!-- 단계 2-b: 탄종 상세 -->
+    <section id="step-ammoDetail" class="menu-step hidden">
+      <div id="ammo-detail" class="detail-pane"></div>
     </section>
 
     <!-- 단계 3: 임무 선택 -->
@@ -42,6 +52,7 @@
 
 <!-- ===== 게임 화면 ===== -->
 <div id="game" class="hidden">
+<div id="stage">
   <canvas id="scope-canvas"></canvas>
 
   <!-- 좌상단: 임무 + 기상 제원 -->
@@ -77,6 +88,30 @@
   <div id="hud-help" class="hud">
     드래그: 조준 · 짧게 클릭: 발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 ·
     Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석 · C: 조준 방식 전환
+  </div>
+</div><!-- /#stage -->
+
+  <!-- 모바일 터치 컨트롤 (뷰포트 고정, 스테이지 스케일과 무관) -->
+  <div id="touch-bar" class="hidden">
+    <div class="tc-left">
+      <div class="tc-row">
+        <button class="tc-btn" data-act="elev+">고각<br>▲</button>
+        <button class="tc-btn" data-act="wind-">◀<br>편차</button>
+        <button class="tc-btn" data-act="wind+">편차<br>▶</button>
+        <button class="tc-btn" data-act="elev-">고각<br>▼</button>
+      </div>
+      <div class="tc-row">
+        <button class="tc-btn sm" data-act="zoom-">－배율</button>
+        <button class="tc-btn sm" data-act="zoom+">＋배율</button>
+        <button class="tc-btn sm" data-act="calc">계산기</button>
+        <button class="tc-btn sm" data-act="reload">재장전</button>
+        <button class="tc-btn sm" data-act="menu">메뉴</button>
+      </div>
+    </div>
+    <div class="tc-right">
+      <button class="tc-btn hold" data-act="breath">숨참기<br>(꾹)</button>
+      <button class="tc-btn fire" data-act="fire">발사</button>
+    </div>
   </div>
 </div>
 

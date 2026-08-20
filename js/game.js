@@ -47,6 +47,7 @@
     timeLeft: 0,
     ending: false,
     magMin: 5,
+    stageScale: 1,
   };
 
   /* ---------------- 유틸 ---------------- */
@@ -147,9 +148,10 @@
   }
   function updateWindAmbience() {
     if (!windAmb || !AC) return;
-    const target = clamp(S.windNow / 14, 0, 1) * 0.22;
+    const w = S.windShooterNow ?? S.windNow;
+    const target = clamp(w / 14, 0, 1) * 0.22;
     windAmb.gain.gain.setTargetAtTime(S.phase === 'play' ? target : 0, AC.currentTime, 0.4);
-    windAmb.filter.frequency.setTargetAtTime(280 + S.windNow * 45, AC.currentTime, 0.6);
+    windAmb.filter.frequency.setTargetAtTime(280 + w * 45, AC.currentTime, 0.6);
   }
   function playDing(delay) {
     const ac = audio(); if (!ac) return;
@@ -197,21 +199,38 @@
     };
   }
 
-  /* 현재 조건 사격 제원 (탄도 계산기, Tab) */
+  /* 레티클에 가장 가까운 생존 표적 (25 mil 이내) — 레이저 측거 대상 */
+  function aimedTarget() {
+    let best = null, bd = 25;
+    for (const tg of S.targets) {
+      if (tg.down) continue;
+      const d = Math.hypot(tg.yawC - S.aim.yaw, tg.centerPit - S.aim.pitch);
+      if (d < bd) { bd = d; best = tg; }
+    }
+    return best;
+  }
+  function aimedDist() {
+    const at = aimedTarget();
+    return at ? at.dist : S.mission.distanceM;
+  }
+
+  /* 현재 조건 사격 제원 (탄도 계산기, Tab) — 조준 중 표적 거리 기준 */
   function computeSolution() {
     const g = geom();
+    const D = aimedDist();
     const env = { ...S.mission.env, windSpeed: S.windMeas, windFromDeg: S.windDirMeas, coriolis: true };
     const p = ammoParams();
     let delta = 0, r = null;
     for (let i = 0; i < 4; i++) {
       r = Ballistics.solveAtRange(p, env,
-        { elevRad: g.incl + S.zeroAngle + delta, azRad: 0 }, g.Dh, { dt: 0.003 });
+        { elevRad: S.zeroAngle + delta, azRad: 0 }, D, { dt: 0.003 });
       if (!r) return null;
-      delta += (g.ty - r.y) / g.Dh;
+      delta += (0 - r.y) / D;
     }
-    const windMil = r ? -(r.z / g.Dh) * 1000 : 0;
+    const windMil = r ? -(r.z / D) * 1000 : 0;
     const e = S.mission.spotterErr;
     return {
+      dist: D,
       // 고각: 거리/대기 입력은 정확 → 소폭 가산 오차만 (최대 ±~0.5 mil)
       elevMil: delta * 1000 + e * S.spotterNoise.elev * 1.2,
       // 윈디지: 바람 관측이 가장 불확실 → 비례 오차
@@ -222,15 +241,17 @@
 
   /* DOPE 표: 사거리별 엘리베이션 + 풍속(full-value)별 윈디지 */
   function buildDope() {
-    const g = geom();
     const p = ammoParams();
     const baseEnv = { ...S.mission.env, windSpeed: 0, coriolis: true };
-    const step = S.mission.distanceM > 1000 ? 200 : 100;
+    const dists = S.map.anchors.map(a => a.dist);
+    const span = Math.max(...dists) - Math.min(...dists);
+    const step = Math.max(...dists) > 1000 ? 200 : 100;
+    const minR = Math.max(step, Math.floor(Math.min(...dists) / step) * step);
     const maxR = Math.min(
-      Math.ceil(S.mission.distanceM * 1.25 / step) * step,
+      Math.ceil(Math.max(...dists) * 1.1 / step) * step,
       S.rifle.effectiveRangeM * 1.6);
     const rows = [];
-    for (let R = step; R <= maxR; R += step) {
+    for (let R = minR; R <= maxR; R += step) {
       let delta = 0, r = null, ok = true;
       for (let i = 0; i < 3; i++) {
         r = Ballistics.solveAtRange(p, baseEnv,
@@ -249,9 +270,9 @@
     S.dope = rows;
     renderDope();
   }
-  function renderDope() {
+  function renderDope(distHint) {
     if (!S.dope) return;
-    const D = S.mission.distanceM;
+    const D = distHint || S.mission.distanceM;
     let best = 0, bd = 1e9;
     S.dope.forEach((r, i) => { const d = Math.abs(r.R - D); if (d < bd) { bd = d; best = i; } });
     const winds = [2, 4, 6, 8];
@@ -272,14 +293,14 @@
   //  mradW는 사진 속 구조물의 실제 크기(픽셀 대비)로 역산해 표적 원근과 일치시킴.
   //  magMin: 사진 세로 커버 한계로 결정되는 최소 배율.
   const BG_META = {
-    farm:     { mradW: 80,  cFrac: 0.62, xFrac: 0.80, magMin: 7 }, // 헛간 ~9 m
-    forest:   { mradW: 70,  cFrac: 0.47, magMin: 6 },              // 유칼립투스 ~15 m
-    plains:   { mradW: 56,  cFrac: 0.68, magMin: 9 },              // 아카시아 ~7 m
-    mountain: { mradW: 140, cFrac: 0.55, magMin: 5 },              // 계곡 오두막 ~4 m
-    desert:   { mradW: 105, cFrac: 0.47, magMin: 5 },              // 야자수 ~8 m
-    tundra:   { mradW: 85,  cFrac: 0.34, magMin: 5 },              // 침엽수 ~12 m
-    kasbah:   { mradW: 75,  cFrac: 0.50, magMin: 7 },              // 건물 2~3층 ~10 m
-    _default: { mradW: 95,  cFrac: 0.46, magMin: 5 },
+    farm:     { mradW: 80,  cFrac: 0.62, xFrac: 0.80, magMin: 7, w: 1280, h: 720 },  // 헛간 ~9 m
+    forest:   { mradW: 70,  cFrac: 0.47, magMin: 6, w: 2400, h: 1600 },              // 유칼립투스 ~15 m
+    plains:   { mradW: 56,  cFrac: 0.68, magMin: 9, w: 717,  h: 427 },               // 아카시아 ~7 m
+    mountain: { mradW: 140, cFrac: 0.55, magMin: 5, w: 960,  h: 533 },               // 계곡 오두막 ~4 m
+    desert:   { mradW: 105, cFrac: 0.47, magMin: 5, w: 2400, h: 1372 },              // 야자수 ~8 m
+    tundra:   { mradW: 85,  cFrac: 0.34, magMin: 5, w: 1000, h: 667 },               // 침엽수 ~12 m
+    kasbah:   { mradW: 75,  cFrac: 0.50, magMin: 7, w: 1920, h: 1100 },              // 건물 2~3층 ~10 m
+    _default: { mradW: 95,  cFrac: 0.46, magMin: 5, w: 1600, h: 1000 },
   };
   const BG = {};
   function tryLoadBg(terrain) {
@@ -291,61 +312,137 @@
     img.src = `assets/bg-${terrain}.jpg`;
   }
 
-  /* ---------------- 게임 시작 / 종료 ---------------- */
+  /* ---------------- 게임 시작: 맵 → 랜덤 스테이지 생성 ---------------- */
+  const randIn = ([a, b]) => a + (b - a) * Math.random();
+  const randInt = ([a, b]) => a + Math.floor(Math.random() * (b - a + 1));
+
+  // 상황 풀: [id, 가중치]
+  const SITUATIONS = [
+    ['none', 0.25], ['hostage', 0.25], ['localwind', 0.2], ['calm', 0.15], ['gustfront', 0.15],
+  ];
+  function rollSituation() {
+    let r = Math.random() * SITUATIONS.reduce((a, x) => a + x[1], 0);
+    for (const [id, w] of SITUATIONS) { r -= w; if (r <= 0) return id; }
+    return 'none';
+  }
+  const SITUATION_TEXT = {
+    none: '',
+    hostage: '⚠ 인질 상황 — 적이 인질을 붙잡고 있다. 인질 피격 = 즉시 실패!',
+    localwind: '주의 — 표적 지역 국지풍. 풍속계는 사수 위치 기준이라 표적 쪽 바람과 다를 수 있다. 깃발을 읽어라.',
+    calm: '정온 — 바람이 잦아든 창이다. 지금이 기회.',
+    gustfront: '돌풍 전선 통과 중 — 바람 변동이 극심하다.',
+  };
+
   function startGame() {
-    const m = S.mission;
-    S.zeroAngle = Ballistics.zeroAngle(ammoParams(), m.env, 100);
+    const map = S.map;
+    const meta = BG_META[map.terrain] || BG_META._default;
+    const pxm = meta.w / meta.mradW; // 사진 px per mrad
+
+    /* ── 기후 특성 범위 안에서 매판 랜덤 추출 ── */
+    const cl = map.climate;
+    let gust = randIn(cl.gustiness);
+    let windSpd = randIn(cl.windSpeed);
+    const situation = rollSituation();
+    if (situation === 'calm') { gust *= 0.35; windSpd *= 0.6; }
+    if (situation === 'gustfront') { gust = Math.min(0.9, gust * 1.8); }
+    const env = {
+      tempC: Math.round(randIn(cl.tempC)),
+      rhPct: Math.round(randIn(cl.rhPct)),
+      windSpeed: +windSpd.toFixed(1),
+      windFromDeg: Math.round(Math.random() * 360),
+      fireAzimuthDeg: Math.round(Math.random() * 360),
+      gustiness: +gust.toFixed(2),
+      inclineDeg: 0,
+      pressurehPa: null,
+      ...map.env, // altitudeM, latitudeDeg, earthCurvature
+    };
+
+    /* ── 사수 바람 vs 표적 지역 바람 (국지풍 상황) ── */
+    S.windSh = { base: env.windSpeed, dir: env.windFromDeg };
+    if (situation === 'localwind') {
+      const sgn = Math.random() < 0.5 ? -1 : 1;
+      S.windTg = {
+        base: Math.max(0.3, env.windSpeed * (1 + sgn * (0.4 + Math.random() * 0.4))),
+        dir: env.windFromDeg + (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 30),
+      };
+    } else {
+      S.windTg = { ...S.windSh };
+    }
+
+    /* ── 표적 스폰: 사진 분석 앵커(발 위치+거리)에서만 ── */
+    const hCount = randInt(map.hostiles);
+    let cCount = randInt(map.civilians);
+    if (situation === 'hostage' && cCount === 0) cCount = 1;
+    const pool = [...map.anchors].sort(() => Math.random() - 0.5);
+    const mkTarget = (type, anchor, latOffM = 0) => {
+      const dist = anchor.dist;
+      const yawC = ((anchor.xF - (meta.xFrac ?? 0.5)) * meta.w) / pxm + (latOffM / dist) * 1000;
+      const pitFeet = ((meta.h * meta.cFrac) - anchor.yF * meta.h) / pxm;
+      const centerPit = pitFeet + (900 / dist); // 인체 중심(0.9 m) 각높이
+      return {
+        type, dist, dh: dist, yawC, pitFeet, centerPit,
+        z: (yawC / 1000) * dist,
+        cY: (centerPit / 1000) * dist,
+        down: false, downT: 0, marks: [],
+        hostage: false,
+      };
+    };
+    S.targets = [];
+    for (let i = 0; i < hCount; i++) {
+      S.targets.push(mkTarget('hostile', pool[i % pool.length]));
+    }
+    let ci = hCount;
+    for (let i = 0; i < cCount; i++) {
+      if (situation === 'hostage' && i === 0) {
+        // 인질: 첫 번째 적 바로 옆(0.45~0.75 m)에 밀착
+        const host = S.targets[0];
+        const anchor = pool[0];
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const civ = mkTarget('civilian', anchor, side * (0.45 + Math.random() * 0.3));
+        civ.hostage = true;
+        S.targets.push(civ);
+      } else {
+        S.targets.push(mkTarget('civilian', pool[(ci++) % pool.length]));
+      }
+    }
+
+    /* ── 대표(중앙값) 거리: 영점·DOPE·분석 기준 ── */
+    const hd = S.targets.filter(t => t.type === 'hostile').map(t => t.dist).sort((a, b) => a - b);
+    const nominal = hd[Math.floor(hd.length / 2)] || map.anchors[0].dist;
+
+    // 이번 판 스테이지 사본 (정적 맵 정의는 S.map에 보존)
+    S.mission = { ...map, env, distanceM: nominal, situation };
+
+    S.zeroAngle = Ballistics.zeroAngle(ammoParams(), env, 100);
     S.aim = { yaw: 0, pitch: 0 };
     S.dial = { elev: 0, wind: 0 };
     S.recoil = { yaw: 0, pitch: 0 };
-    S.magMin = (BG_META[m.terrain] || BG_META._default).magMin || 5;
+    S.magMin = meta.magMin || 5;
     S.mag = clamp(12, S.magMin, 25);
     S.magazine = S.rifle.magCapacity;
-    S.shots = []; S.impactMarks = []; S.puffs = [];
+    S.shots = []; S.puffs = [];
     S.score = 0; S.firedTotal = 0;
     S.o2 = 100; S.heartRate = 70; S.recovering = 0;
     S.activeShot = null; S.reloading = false; S.canFireAt = 0;
     S.spotterNoise = { wind: gauss() * 0.5, dir: gauss() * 0.5, elev: gauss() * 0.3 };
     S.calcSolution = null;
     S.windHist = [];
-    S.windMeas = m.env.windSpeed; S.windDirMeas = m.env.windFromDeg;
-    S.sceneSeed = [...m.id].reduce((a, c) => a + c.charCodeAt(0), 7);
-    tryLoadBg(m.terrain);
-
-    // ── 다중 표적 배치: 거리 ±10%, 좌우 산개, 각도상 최소 이격 3.4 mil ──
-    S.targets = [];
-    const incl = m.env.inclineDeg * Math.PI / 180;
-    const spawn = type => {
-      for (let tries = 0; tries < 50; tries++) {
-        const Di = m.distanceM * (1 + (Math.random() * 2 - 1) * 0.10);
-        const dh = Di * Math.cos(incl);
-        const z = (Math.random() * 2 - 1) * m.distanceM * 0.03;
-        const yaw = z / dh * 1000;
-        if (Math.abs(yaw) > 26) continue;
-        if (S.targets.every(o => Math.abs(o.z / o.dh * 1000 - yaw) > 3.4)) {
-          S.targets.push({ type, dh, z, down: false, downT: 0, marks: [] });
-          return;
-        }
-      }
-      S.targets.push({
-        type, dh: m.distanceM * Math.cos(incl),
-        z: (Math.random() * 2 - 1) * m.distanceM * 0.03,
-        down: false, downT: 0, marks: [],
-      });
-    };
-    for (let i = 0; i < (m.hostiles ?? 1); i++) spawn('hostile');
-    for (let i = 0; i < (m.civilians ?? 0); i++) spawn('civilian');
-    S.timeLeft = m.timeLimitS ?? 180;
+    S.windMeas = env.windSpeed; S.windDirMeas = env.windFromDeg;
+    S.sceneSeed = [...map.id].reduce((a, c) => a + c.charCodeAt(0), 7) + Math.floor(Math.random() * 100);
+    tryLoadBg(map.terrain);
+    S.timeLeft = map.timeLimitS ?? 180;
     S.ending = false;
 
     S.phase = 'play';
     $('menu').classList.add('hidden');
     $('result').classList.add('hidden');
     $('game').classList.remove('hidden');
-    setMsg(`임무 개시 — ${m.name} · 적 ${m.hostiles ?? 1}` +
-      ((m.civilians ?? 0) ? ` · 민간인 ${m.civilians} (사격 금지!)` : ''), 5);
+    setMsg(`임무 개시 — ${map.name} · 적 ${hCount}` +
+      (cCount ? ` · 민간인 ${cCount} (사격 금지!)` : '') +
+      (situation !== 'none' ? ` · ${SITUATION_TEXT[situation].split(' — ')[0]}` : ''), 6);
     buildDope();
     updateHelpText();
+    updateTouchBar();
     resize();
   }
   function backToMenu() {
@@ -355,6 +452,7 @@
     $('analysis').classList.add('hidden');
     $('result').classList.add('hidden');
     $('menu').classList.remove('hidden');
+    updateTouchBar();
     showStep('rifle');
   }
   function setMsg(text, dur = 3) { S.msg = text; S.msgUntil = now() + dur; }
@@ -435,11 +533,12 @@
     let hitIdx = -1, hitZone = null, hitAt = null;
     const order = S.targets.map((tg, i) => i)
       .filter(i => !S.targets[i].down && S.targets[i].dh <= reach)
-      .sort((a, b) => S.targets[a].dh - S.targets[b].dh);
+      .sort((a, b) => (S.targets[a].dh - S.targets[b].dh) ||
+        ((S.targets[a].type === 'civilian' ? 0 : 1) - (S.targets[b].type === 'civilian' ? 0 : 1)));
     for (const i of order) {
       const tg = S.targets[i];
       const p = atX(tg.dh);
-      const dy = p.y - (gYat(tg.dh) + 0.9), dz = p.z - tg.z;
+      const dy = p.y - tg.cY, dz = p.z - tg.z;
       const zh = zoneHit(dy, dz);
       if (zh) { hitIdx = i; hitZone = zh; hitAt = { ...p, dy, dz }; break; }
     }
@@ -451,7 +550,7 @@
       for (const tg of S.targets) {
         if (tg.down || tg.dh > reach) continue;
         const p = atX(tg.dh);
-        const dy = p.y - (gYat(tg.dh) + 0.9), dz = p.z - tg.z;
+        const dy = p.y - tg.cY, dz = p.z - tg.z;
         const dist = Math.hypot(dy, dz);
         if (dist < bd) { bd = dist; missInfo = { dy, dz, dh: tg.dh, p }; }
       }
@@ -476,8 +575,8 @@
       if (tg.type === 'civilian') {
         playThud(tg.dh / 343);
         S.shots.push({ hit: true, civilian: true });
-        setMsg('민간인 피격!', 4);
-        endMission(false, '민간인 피격 — 교전 수칙 위반');
+        setMsg(tg.hostage ? '인질 피격!' : '민간인 피격!', 4);
+        endMission(false, tg.hostage ? '인질 피격 — 구출 실패' : '민간인 피격 — 교전 수칙 위반');
         return;
       }
       playDing(tg.dh / 343);
@@ -538,6 +637,7 @@
       <tr><td>남은 시간</td><td>${fmt(Math.max(0, S.timeLeft), 0)}초 / ${S.mission.timeLimitS}초</td></tr>
       <tr><td>총점</td><td>${S.score}</td></tr></table>`;
     $('result').classList.remove('hidden');
+    updateTouchBar();
   }
 
   function reload() {
@@ -566,20 +666,23 @@
       if (S.timeLeft <= 0) { S.timeLeft = 0; endMission(false, '시간 초과'); }
     }
 
-    // ── 바람: 장주기 드리프트(기류 변화) × 단주기 돌풍 ──
+    // ── 바람: 장주기 드리프트 × 단주기 돌풍 — 사수 위치와 표적 지역을 분리 ──
     S.windNoiseT += dt;
-    const slow = 1 + 0.45 * noise1(S.windNoiseT * 0.035, 21);           // 수 분 주기
-    const fast = 1 + gust * 0.6 * noise1(S.windNoiseT * 0.6, 1);        // 돌풍
-    S.windNow = Math.max(0, env.windSpeed * slow * fast);
-    S.windDirNow = env.windFromDeg
-      + 28 * noise1(S.windNoiseT * 0.022, 22)                            // 풍향 장주기 변화
-      + 12 * gust * noise1(S.windNoiseT * 0.35, 2);                      // 순간 요동
+    const T = S.windNoiseT;
+    const slow = 1 + 0.45 * noise1(T * 0.035, 21);
+    const drift = 28 * noise1(T * 0.022, 22) + 12 * gust * noise1(T * 0.35, 2);
+    // 사수 위치 바람 (풍속계·바람 소리의 기준)
+    S.windShooterNow = Math.max(0, (S.windSh?.base ?? env.windSpeed) * slow * (1 + gust * 0.6 * noise1(T * 0.6, 1)));
+    S.windShooterDirNow = (S.windSh?.dir ?? env.windFromDeg) + drift;
+    // 표적 지역 바람 (실제 탄도·표적 근처 깃발의 기준 — 국지풍 상황이면 다름)
+    S.windNow = Math.max(0, (S.windTg?.base ?? env.windSpeed) * slow * (1 + gust * 0.6 * noise1(T * 0.6, 4)));
+    S.windDirNow = (S.windTg?.dir ?? env.windFromDeg) + drift * 0.85 + 8 * gust * noise1(T * 0.4, 9);
 
-    // 풍속계 표시값: 1초 시정수 스무딩 + 관측 오차
+    // 풍속계 표시값: '사수 위치' 바람 + 1초 시정수 스무딩 + 관측 오차
     const e = S.mission.spotterErr;
     const k = 1 - Math.exp(-dt / 0.8);
-    S.windMeas += (S.windNow * (1 + e * S.spotterNoise.wind * 0.4) - S.windMeas) * k;
-    S.windDirMeas += (S.windDirNow + e * 15 * S.spotterNoise.dir - S.windDirMeas) * k;
+    S.windMeas += (S.windShooterNow * (1 + e * S.spotterNoise.wind * 0.4) - S.windMeas) * k;
+    S.windDirMeas += (S.windShooterDirNow + e * 15 * S.spotterNoise.dir - S.windDirMeas) * k;
     if (t - lastHistPush > 0.25) {
       lastHistPush = t;
       S.windHist.push({ t, v: S.windMeas });
@@ -700,10 +803,16 @@
     const clock = `${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')}`;
     const hostRemain = S.targets.filter(x => x.type === 'hostile' && !x.down).length;
     const civCount = S.targets.filter(x => x.type === 'civilian' && !x.down).length;
+    const at = aimedTarget();
+    const laser = at
+      ? `<b>${at.dist.toLocaleString()} m</b> <span class="warn">◆ 표적 조준</span>`
+      : `<b>${m.distanceM.toLocaleString()} m</b> <span style="font-size:10px">(대표)</span>`;
+    const sitText = SITUATION_TEXT[m.situation] || '';
     $('hud-mission').innerHTML =
       `<h4>임무</h4><b>${m.name}</b><br>` +
+      (sitText ? `<span class="${m.situation === 'hostage' ? 'bad' : 'warn'}" style="font-size:11.5px">${sitText}</span><br>` : '') +
       `<span style="color:var(--dim);font-size:11.5px">` +
-      `거리(레이저) <b>${m.distanceM.toLocaleString()} m</b> · 경사 ${fmt(env.inclineDeg, 0)}°<br>` +
+      `거리(레이저) ${laser}<br>` +
       `기온 ${fmt(env.tempC, 0)}℃ · 습도 ${fmt(env.rhPct, 0)}% · 고도 ${env.altitudeM.toLocaleString()} m<br>` +
       `기압 ${fmt(Ballistics.pressureAtAltitude(env.altitudeM), 0)} hPa · 위도 ${fmt(env.latitudeDeg, 1)}° · 방위 ${fmt(env.fireAzimuthDeg, 0)}°` +
       (env.earthCurvature ? ' · <span class="warn">곡률 유효</span>' : '') +
@@ -712,6 +821,9 @@
       `적 <b>${hostRemain}</b> 남음` +
       (civCount ? ` · <span class="bad">민간인 ${civCount} — 사격 금지</span>` : '') +
       `<br><span class="warn">점수 ${S.score}</span> · 발사 ${S.firedTotal} · 명중 ${S.shots.filter(x => x.hit && !x.civilian).length}`;
+    // DOPE 강조 행을 조준 중 표적 거리로
+    const hint = at ? at.dist : m.distanceM;
+    if (S._dopeHint !== hint) { S._dopeHint = hint; renderDope(hint); }
 
     $('hud-weapon').innerHTML =
       `<h4>화기 / 선택 탄종</h4><b>${S.rifle.name}</b><br>` +
@@ -745,9 +857,15 @@
   }
 
   /* ---------------- 렌더링 ---------------- */
+  // 논리 해상도 고정(1440×900) — 모든 기기에서 같은 화면 비율.
+  const BASE_W = 1440, BASE_H = 900;
   function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    canvas.width = BASE_W;
+    canvas.height = BASE_H;
+    const sc = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
+    S.stageScale = sc;
+    const st = $('stage');
+    if (st) st.style.transform = `translate(-50%, -50%) scale(${sc})`;
   }
   window.addEventListener('resize', resize);
   resize();
@@ -1003,15 +1121,15 @@
       ctx.closePath(); ctx.fill();
     }
 
-    /* ===== 인간형 표적지 (180 cm, 거리 비례 각크기) ===== */
-    for (const tg of S.targets) {
-      const cY = groundYat(tg.dh) + 0.9;
-      const yawC = Math.atan2(tg.z, tg.dh) * 1000;
-      const pitC = relPitch(Math.atan2(cY, tg.dh));
-      const x = sx(yawC), y = sy(pitC);
-      if (x < -120 || x > Wv + 120) continue;
-      const k = ppmW * 1000 / tg.dh; // px per meter @ 표적 거리
-      drawHuman(x, y, k, tg, t);
+    /* ===== 인간형 표적지 — 사진 앵커(발 위치) 고정, 거리 비례 크기 =====
+     * 적을 먼저, 민간인/인질을 나중에 그려 인질이 앞에 보이게 한다. */
+    const drawOrder = [...S.targets].sort((a, b) =>
+      (a.type === 'civilian' ? 1 : 0) - (b.type === 'civilian' ? 1 : 0));
+    for (const tg of drawOrder) {
+      const x = sx(tg.yawC), yFeet = sy(tg.pitFeet);
+      if (x < -160 || x > Wv + 160) continue;
+      const k = ppmW * 1000 / tg.dist; // px per meter @ 표적 거리
+      drawTargetSheet(x, yFeet, k, tg, t);
     }
 
     /* ===== 착탄 먼지 ===== */
@@ -1068,64 +1186,131 @@
     ctx = prevCtx;
   }
 
-  /* 인간형 표적지: 적(무장 실루엣) / 민간인(손 든 밝은 실루엣) */
-  function drawHuman(x, y, k, tg, t) {
+  /* 사격장 인간형 표적지 (첨부 참조 스타일)
+   *  적: 종이 표적지 위 검은 실루엣 + 흉부 링(7/8/9/10/X) + 헤드샷 존
+   *  민간인/인질: 파란 실루엣 + 두 손 든 자세 (NO-SHOOT)
+   *  x=발 위치 화면좌표, yFeet=발 y, k=px per meter. 시트 바닥 = 발 = 지면. */
+  function drawTargetSheet(x, yFeet, k, tg, t) {
     const civ = tg.type === 'civilian';
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(x, yFeet);
     if (tg.down) {
       const age = t - (tg.downT || t);
       const fall = Math.min(1, age * 2.2);
-      ctx.globalAlpha = 1 - 0.45 * fall;
-      ctx.translate(0, 0.9 * k);
-      ctx.rotate((civ ? -1 : 1) * fall * Math.PI / 2 * 0.92);
-      ctx.translate(0, -0.9 * k);
+      ctx.globalAlpha = 1 - 0.4 * fall;
+      ctx.rotate((civ ? -1 : 1) * fall * Math.PI / 2 * 0.9); // 발(지면) 기준 뒤로 넘어감
     }
-    const fill = civ ? '#e6dfcd' : '#31363c';
-    const line = civ ? '#8a8168' : '#15181b';
-    const rr = (x0, y0, w, h, r) => {
-      ctx.beginPath();
-      ctx.moveTo(x0 + r, y0);
-      ctx.arcTo(x0 + w, y0, x0 + w, y0 + h, r);
-      ctx.arcTo(x0 + w, y0 + h, x0, y0 + h, r);
-      ctx.arcTo(x0, y0 + h, x0, y0, r);
-      ctx.arcTo(x0, y0, x0 + w, y0, r);
-      ctx.closePath();
-    };
-    // 표적지 받침대
-    ctx.strokeStyle = '#4b423a';
-    ctx.lineWidth = Math.max(1, 0.03 * k);
-    ctx.beginPath(); ctx.moveTo(-0.30 * k, 0.9 * k); ctx.lineTo(0.30 * k, 0.9 * k); ctx.stroke();
-    ctx.fillStyle = fill; ctx.strokeStyle = line;
-    ctx.lineWidth = Math.max(1, 0.02 * k);
-    // 몸통 (+0.64 ~ -0.12 m)
-    rr(-0.20 * k, -0.64 * k, 0.40 * k, 0.76 * k, 0.07 * k);
-    ctx.fill(); ctx.stroke();
-    // 골반 / 다리
-    ctx.fillRect(-0.17 * k, 0.12 * k, 0.34 * k, 0.20 * k);
-    ctx.fillRect(-0.15 * k, 0.32 * k, 0.12 * k, 0.58 * k);
-    ctx.fillRect(0.03 * k, 0.32 * k, 0.12 * k, 0.58 * k);
+    const Y = m => -m * k; // 지면 기준 높이[m] → 화면 y
+
+    // 지지 말뚝 + 종이 시트
+    ctx.strokeStyle = '#5a4c38';
+    ctx.lineWidth = Math.max(1, 0.04 * k);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, Y(1.86)); ctx.stroke();
+    const shW = 0.72 * k;
+    ctx.fillStyle = civ ? '#eef1f2' : '#e8e2d2';
+    ctx.strokeStyle = 'rgba(60,55,45,0.7)';
+    ctx.lineWidth = Math.max(0.8, 0.015 * k);
+    ctx.fillRect(-shW / 2, Y(1.84), shW, 1.8 * k);
+    ctx.strokeRect(-shW / 2, Y(1.84), shW, 1.8 * k);
+
+    // ── 실루엣 (발 0.06 ~ 머리 1.80) ──
+    const ink = civ ? '#4a7396' : '#141517';
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    // 몸통·다리 윤곽 (대칭 폴리곤)
+    const P = [ // [높이m, 반폭m] 아래→위
+      [0.06, 0.09], [0.06, 0.17], [0.55, 0.16], [0.86, 0.19],
+      [1.05, 0.21], [1.28, 0.30], [1.47, 0.31], [1.56, 0.15], [1.60, 0.085],
+    ];
+    ctx.moveTo(-P[0][1] * k, Y(P[0][0]));
+    for (const [h, w] of P) ctx.lineTo(-w * k, Y(h));
+    for (let i = P.length - 1; i >= 0; i--) ctx.lineTo(P[i][1] * k, Y(P[i][0]));
+    ctx.closePath();
+    ctx.fill();
+    // 다리 사이 홈
+    ctx.fillStyle = civ ? '#eef1f2' : '#e8e2d2';
+    ctx.fillRect(-0.025 * k, Y(0.52), 0.05 * k, 0.46 * k);
     // 머리
-    ctx.beginPath(); ctx.arc(0, -0.76 * k, 0.11 * k, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = ink;
+    ctx.beginPath(); ctx.arc(0, Y(1.68), 0.125 * k, 0, TAU); ctx.fill();
     if (civ) {
-      // 두 손 든 자세
-      ctx.fillRect(-0.29 * k, -0.98 * k, 0.09 * k, 0.44 * k);
-      ctx.fillRect(0.20 * k, -0.98 * k, 0.09 * k, 0.44 * k);
-    } else {
-      // 가슴 앞 대각 소총
-      ctx.strokeStyle = '#0c0e10';
-      ctx.lineWidth = 0.07 * k;
+      // 두 손 든 자세 (NO-SHOOT)
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 0.09 * k;
       ctx.beginPath();
-      ctx.moveTo(-0.32 * k, 0.08 * k);
-      ctx.lineTo(0.36 * k, -0.30 * k);
+      ctx.moveTo(-0.28 * k, Y(1.34)); ctx.lineTo(-0.40 * k, Y(1.78));
+      ctx.moveTo(0.28 * k, Y(1.34)); ctx.lineTo(0.40 * k, Y(1.78));
       ctx.stroke();
-    }
-    // 피탄 흔적
-    for (const mk of tg.marks) {
-      ctx.fillStyle = civ ? '#b03a2e' : '#0d0f11';
       ctx.beginPath();
-      ctx.arc(mk.dz * k, -mk.dy * k, Math.max(1.5, 0.035 * k), 0, TAU);
+      ctx.arc(-0.40 * k, Y(1.82), 0.055 * k, 0, TAU);
+      ctx.arc(0.40 * k, Y(1.82), 0.055 * k, 0, TAU);
       ctx.fill();
+      ctx.restore();
+      // 인질 표시 띠
+      if (tg.hostage && k > 18) {
+        ctx.fillStyle = '#c0392b';
+        ctx.font = `700 ${Math.max(8, 0.11 * k)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('인질', 0, Y(0.30));
+      }
+    } else {
+      // ── 흉부 스코어링 링 (중심 1.30 m) + 숫자 ──
+      const cyM = 1.30;
+      const rings = [ // [반폭m, 반높이m, 라벨]
+        [0.315, 0.50, '7'], [0.245, 0.40, '8'], [0.17, 0.29, '9'], [0.10, 0.175, '10'],
+      ];
+      ctx.save();
+      // 실루엣 밖으로 링이 나가지 않게 클리핑
+      ctx.beginPath();
+      ctx.moveTo(-P[0][1] * k, Y(P[0][0]));
+      for (const [h, w] of P) ctx.lineTo(-w * k, Y(h));
+      for (let i = P.length - 1; i >= 0; i--) ctx.lineTo(P[i][1] * k, Y(P[i][0]));
+      ctx.closePath(); ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx.lineWidth = Math.max(0.8, 0.016 * k);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const numFont = Math.max(6, 0.10 * k);
+      for (const [rw, rh, label] of rings) {
+        ctx.beginPath();
+        ctx.ellipse(0, Y(cyM), rw * k, rh * k, 0, 0, TAU);
+        ctx.stroke();
+        if (k >= 55) {
+          ctx.font = `700 ${numFont}px sans-serif`;
+          ctx.fillText(label, 0, Y(cyM + rh - 0.055));
+          ctx.fillText(label, 0, Y(cyM - rh + 0.055));
+        }
+      }
+      // 중심 X 링 (빨강)
+      ctx.strokeStyle = '#c0392b';
+      ctx.beginPath();
+      ctx.ellipse(0, Y(cyM), 0.05 * k, 0.09 * k, 0, 0, TAU);
+      ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      ctx.font = `800 ${Math.max(6, 0.11 * k)}px sans-serif`;
+      if (k >= 30) ctx.fillText('X', 0, Y(cyM));
+      // 헤드샷 존: 머리 중앙 링 + 점
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx.beginPath(); ctx.arc(0, Y(1.68), 0.095 * k, 0, TAU); ctx.stroke();
+      ctx.fillStyle = '#c0392b';
+      ctx.beginPath(); ctx.arc(0, Y(1.68), Math.max(1.2, 0.032 * k), 0, TAU); ctx.fill();
+      if (k >= 70) {
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = `700 ${Math.max(6, 0.075 * k)}px sans-serif`;
+        ctx.fillText('HEAD', 0, Y(1.86));
+      }
+      ctx.restore();
+    }
+    // ── 피탄 흔적 (총알구멍) ──
+    for (const mk of tg.marks) {
+      const hx = mk.dz * k, hy = Y(0.9 + mk.dy);
+      ctx.fillStyle = civ ? '#c0392b' : '#efe9dc';
+      ctx.beginPath(); ctx.arc(hx, hy, Math.max(1.2, 0.028 * k), 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = Math.max(0.6, 0.008 * k);
+      ctx.beginPath(); ctx.arc(hx, hy, Math.max(1.2, 0.028 * k), 0, TAU); ctx.stroke();
     }
     ctx.restore();
   }
@@ -1375,7 +1560,8 @@
     ctx.shadowBlur = 8;
     ctx.fillStyle = '#ff3b28';
     const yLed = cy + R * 0.62;
-    ctx.fillText(`${m.distanceM}m`, cx - R * 0.33, yLed);
+    const at = aimedTarget();
+    ctx.fillText(at ? `◆${at.dist}m` : `${m.distanceM}m`, cx - R * 0.33, yLed);
     // 풍속 + 방향 화살표 (사수 기준 불어가는 방향)
     const rel = (S.windDirMeas - m.env.fireAzimuthDeg + 180) * Math.PI / 180;
     ctx.fillText(`${S.windMeas.toFixed(1)}㎧`, cx + R * 0.30, yLed);
@@ -1464,26 +1650,189 @@
       해석적 방법: 편미분 민감도 합성 σ² = Σ(∂·σ)² · 실험적 방법: 몬테카를로 400발 탄착군.</p>`;
   }
 
-  /* ---------------- 메뉴 ---------------- */
+  /* ---------------- 메뉴: 아이콘 그리드 + 상세 화면 ---------------- */
   function srcLine(item) {
     if (!item.descSourceUrl) return '';
     const label = item.descSource === 'wikipedia' ? '위키피디아' : '공식 페이지';
     return `<div class="src">출처(${label}): <a href="${item.descSourceUrl}" target="_blank" rel="noopener">${new URL(item.descSourceUrl).hostname}</a></div>`;
   }
+
+  /* 총기 측면 실루엣 (절차적) */
+  function drawRifleIcon(cv, id, scale = 1) {
+    const c = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    c.clearRect(0, 0, W, H);
+    c.save();
+    c.translate(W / 2, H / 2);
+    c.scale(scale, scale);
+    const ink = '#222824';
+    c.fillStyle = ink; c.strokeStyle = ink;
+    c.lineWidth = 2; c.lineJoin = 'round';
+    const rect = (x, y, w, h, r = 0) => {
+      c.beginPath();
+      if (r) {
+        c.moveTo(x + r, y);
+        c.arcTo(x + w, y, x + w, y + h, r);
+        c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r);
+        c.arcTo(x, y, x + w, y, r);
+      } else c.rect(x, y, w, h);
+      c.closePath(); c.fill();
+    };
+    const poly = pts => {
+      c.beginPath();
+      pts.forEach((p, i) => i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]));
+      c.closePath(); c.fill();
+    };
+    // 공통: 스코프 + 마운트
+    const scopeAt = (x, w) => {
+      rect(x, -21, w, 8, 4);                 // 경통
+      rect(x - 6, -20, 8, 6, 2);             // 접안
+      rect(x + w - 2, -21.5, 9, 9, 3);       // 대물
+      rect(x + w * 0.3, -14, 5, 5);          // 마운트
+      rect(x + w * 0.75, -14, 5, 5);
+    };
+    switch (id) {
+      case 'rem700': // 클래식 수렵형 원피스 스톡
+        poly([[-96, 6], [-60, -4], [-20, -6], [40, -6], [40, 2], [-16, 4], [-52, 14], [-88, 18]]);
+        rect(-20, -9, 62, 8, 2);              // 리시버
+        rect(40, -7, 62, 4);                  // 총열
+        scopeAt(-16, 48);
+        poly([[-6, 2], [2, 12], [8, 12], [4, 2]]); // 방아쇠울
+        break;
+      case 'trg42': // 각진 전술 스톡 + 수직 그립
+        poly([[-98, -6], [-70, -6], [-70, 12], [-86, 14], [-98, 10]]);   // 버트
+        rect(-72, -8, 46, 14, 2);             // 스톡 몸통
+        poly([[-30, 4], [-24, 20], [-16, 20], [-18, 4]]);                // 그립
+        rect(-30, -9, 66, 10, 2);             // 리시버/섀시
+        rect(36, -7, 58, 5);                  // 총열
+        rect(94, -8, 8, 7);                   // 머즐브레이크
+        scopeAt(-22, 52);
+        rect(20, 3, 30, 4);                   // 핸드가드 하부
+        break;
+      case 'axsr': // 접철 섀시 + 스켈레톤 스톡
+        rect(-98, -7, 10, 20, 2);             // 버트패드
+        rect(-88, -3, 26, 4);                 // 스켈레톤 상봉
+        rect(-88, 8, 26, 4);                  // 하봉
+        rect(-64, -8, 30, 16, 2);             // 접철부/그립부
+        poly([[-40, 4], [-34, 20], [-26, 20], [-28, 4]]);
+        rect(-38, -10, 70, 11, 2);            // 리시버(모노리식 레일)
+        rect(-38, -12, 70, 3);
+        rect(32, 0, 34, 8, 2);                // 핸드가드
+        rect(32, -7, 60, 5);                  // 총열
+        rect(92, -9, 10, 9);                  // 브레이크
+        scopeAt(-28, 56);
+        break;
+      case 'm107a1': // 대구경 반자동: 길고 각진 상부 + 화살촉 브레이크
+        rect(-100, -8, 14, 20, 2);            // 버트
+        rect(-86, -6, 30, 14);
+        rect(-58, -11, 118, 13, 2);           // 길쭉한 리시버
+        poly([[-24, 2], [-18, 20], [-10, 20], [-12, 2]]);
+        rect(-46, 2, 20, 12, 2);              // 탄창(대형)
+        rect(60, -8, 34, 6);                  // 총열
+        poly([[94, -11], [106, -5], [94, 1]]); // 화살촉 브레이크
+        scopeAt(-30, 54);
+        poly([[20, 2], [34, 14], [40, 14], [40, 10], [28, 2]]); // 양각대 접힘
+        break;
+      case 'm200': // 인터벤션: 튜브 섀시 + 스켈레톤 스톡 + 모노포드
+        rect(-102, -6, 12, 18, 3);
+        rect(-90, -2, 22, 4);                 // 상봉
+        rect(-90, 9, 22, 3);                  // 하봉
+        rect(-92, 12, 5, 10);                 // 모노포드
+        rect(-68, -9, 36, 18, 3);             // 후방 섀시 블록
+        poly([[-36, 4], [-30, 20], [-22, 20], [-24, 4]]);
+        rect(-34, -10, 58, 11, 2);            // 리시버
+        rect(24, -4, 26, 8, 3);               // 튜브 핸드가드
+        rect(24, -7, 66, 5);                  // 총열
+        rect(90, -9, 12, 9, 2);               // 대형 브레이크
+        scopeAt(-26, 50);
+        poly([[30, 4], [40, 16], [46, 16], [46, 12], [36, 4]]);
+        break;
+    }
+    c.restore();
+  }
+
+  /* 탄약 측면 (구경별 실제 비례) */
+  const CASE_DIMS = { // [케이스 길이mm, 림 지름mm, 탄자 노출mm]
+    '.308 Winchester': [51, 12, 15],
+    '.338 Lapua Magnum': [70, 15, 20],
+    '.50 BMG': [99, 20, 31],
+    '.408 CheyTac': [77, 16, 27],
+  };
+  function drawAmmoIcon(cv, ammo, scale = 1) {
+    const c = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    c.clearRect(0, 0, W, H);
+    const [caseL, rim, bulletL] = CASE_DIMS[ammo.caliber] || [60, 14, 18];
+    const pxPerMm = (W * 0.72) / 130 * scale; // .50 BMG(130mm 전장)를 기준 폭에 맞춤
+    const cl = caseL * pxPerMm, bl = bulletL * pxPerMm, r = rim * pxPerMm / 2;
+    const total = cl + bl;
+    c.save();
+    c.translate(W / 2 - total / 2, H / 2);
+    // 케이스 (황동)
+    const brass = c.createLinearGradient(0, -r, 0, r);
+    brass.addColorStop(0, '#d9b878'); brass.addColorStop(0.45, '#a8863f');
+    brass.addColorStop(0.6, '#c8a25c'); brass.addColorStop(1, '#7a5f2c');
+    c.fillStyle = brass;
+    c.beginPath();
+    c.moveTo(0, -r); c.lineTo(cl * 0.72, -r);          // 몸통
+    c.lineTo(cl * 0.86, -r * 0.55);                     // 숄더
+    c.lineTo(cl, -r * 0.5);                             // 넥
+    c.lineTo(cl, r * 0.5);
+    c.lineTo(cl * 0.86, r * 0.55);
+    c.lineTo(cl * 0.72, r);
+    c.lineTo(0, r);
+    c.closePath(); c.fill();
+    // 림/추출홈
+    c.fillRect(-2, -r, 3, r * 2);
+    c.fillStyle = 'rgba(0,0,0,0.25)';
+    c.fillRect(2, -r * 0.92, 2.5, r * 1.84);
+    // 탄자 (구리)
+    const cu = c.createLinearGradient(0, -r * 0.5, 0, r * 0.5);
+    cu.addColorStop(0, '#c67e4a'); cu.addColorStop(0.5, '#8c4d22'); cu.addColorStop(1, '#5f3315');
+    c.fillStyle = cu;
+    c.beginPath();
+    c.moveTo(cl, -r * 0.5);
+    c.quadraticCurveTo(cl + bl * 0.72, -r * 0.44, cl + bl, 0);  // 오자이브
+    c.quadraticCurveTo(cl + bl * 0.72, r * 0.44, cl, r * 0.5);
+    c.closePath(); c.fill();
+    c.restore();
+  }
+
   function buildMenu() {
     const rl = $('rifle-list');
     rl.innerHTML = '';
     for (const r of GameData.rifles) {
       const el = document.createElement('div');
-      el.className = 'card';
-      el.innerHTML =
-        `<h3>${r.name}</h3><div class="sub">${r.caliber}</div>` +
-        `<div class="desc">${r.desc}</div>` +
-        `<div class="specs">총열 ${r.barrelMm} mm · 중량 ${r.weightKg} kg · 장탄 ${r.magCapacity}발 · 유효사거리 ~${r.effectiveRangeM.toLocaleString()} m</div>` +
-        srcLine(r);
-      el.onclick = () => { S.rifle = r; showStep('ammo'); };
+      el.className = 'icon-card';
+      const cv = document.createElement('canvas');
+      cv.width = 220; cv.height = 76;
+      el.appendChild(cv);
+      el.insertAdjacentHTML('beforeend', `<h3>${r.name}</h3><div class="sub">${r.caliber}</div>`);
+      drawRifleIcon(cv, r.id);
+      el.onclick = () => showRifleDetail(r);
       rl.appendChild(el);
     }
+  }
+  function showRifleDetail(r) {
+    const pane = $('rifle-detail');
+    pane.innerHTML = '';
+    const cv = document.createElement('canvas');
+    cv.width = 440; cv.height = 150;
+    pane.appendChild(cv);
+    pane.insertAdjacentHTML('beforeend',
+      `<h3>${r.name}</h3><div class="sub">${r.caliber}</div>` +
+      `<div class="desc">${r.desc}</div>` +
+      `<div class="specs">총열 ${r.barrelMm} mm · 중량 ${r.weightKg} kg · 장탄 ${r.magCapacity}발 · 유효사거리 ~${r.effectiveRangeM.toLocaleString()} m</div>` +
+      srcLine(r) +
+      `<div class="detail-btns">
+        <button class="btn-primary" id="rifle-pick">이 총기 선택 →</button>
+        <button class="btn-back" id="rifle-back">← 돌아가기</button>
+      </div>`);
+    drawRifleIcon(cv, r.id, 2);
+    $('rifle-pick').onclick = () => { S.rifle = r; showStep('ammo'); };
+    $('rifle-back').onclick = () => showStep('rifle');
+    showStep('rifleDetail');
   }
   function buildAmmoMenu() {
     const al = $('ammo-list');
@@ -1491,15 +1840,35 @@
     for (const id of S.rifle.ammoIds) {
       const a = GameData.getAmmo(id);
       const el = document.createElement('div');
-      el.className = 'card';
-      el.innerHTML =
-        `<h3>${a.name}</h3><div class="sub">${a.caliber}</div>` +
-        `<div class="desc">${a.desc}</div>` +
-        `<div class="specs">탄두 ${a.bulletGr} gr · BC(${a.dragModel}) ${a.bc} · 총구속도 ${fmt(a.mv, 0)} m/s</div>` +
-        srcLine(a);
-      el.onclick = () => { S.ammo = a; showStep('mission'); };
+      el.className = 'icon-card';
+      const cv = document.createElement('canvas');
+      cv.width = 220; cv.height = 76;
+      el.appendChild(cv);
+      el.insertAdjacentHTML('beforeend', `<h3>${a.name}</h3><div class="sub">${a.caliber}</div>`);
+      drawAmmoIcon(cv, a);
+      el.onclick = () => showAmmoDetail(a);
       al.appendChild(el);
     }
+  }
+  function showAmmoDetail(a) {
+    const pane = $('ammo-detail');
+    pane.innerHTML = '';
+    const cv = document.createElement('canvas');
+    cv.width = 440; cv.height = 130;
+    pane.appendChild(cv);
+    pane.insertAdjacentHTML('beforeend',
+      `<h3>${a.name}</h3><div class="sub">${a.caliber}</div>` +
+      `<div class="desc">${a.desc}</div>` +
+      `<div class="specs">탄두 ${a.bulletGr} gr · BC(${a.dragModel}) ${a.bc} · 총구속도 ${fmt(a.mv, 0)} m/s · V₀ 편차 σ ${a.mvSd} m/s</div>` +
+      srcLine(a) +
+      `<div class="detail-btns">
+        <button class="btn-primary" id="ammo-pick">이 탄약 선택 →</button>
+        <button class="btn-back" id="ammo-back">← 돌아가기</button>
+      </div>`);
+    drawAmmoIcon(cv, a, 1.6);
+    $('ammo-pick').onclick = () => { S.ammo = a; showStep('mission'); };
+    $('ammo-back').onclick = () => showStep('ammo');
+    showStep('ammoDetail');
   }
   function buildMissionMenu() {
     const ml = $('mission-list');
@@ -1507,23 +1876,28 @@
     for (const m of GameData.missions) {
       const el = document.createElement('div');
       el.className = 'card';
-      const env = m.env;
+      const cl = m.climate;
+      const dists = m.anchors.map(a => a.dist);
+      const dMin = Math.min(...dists), dMax = Math.max(...dists);
       el.innerHTML =
-        `<h3>${m.name}</h3><div class="sub">표적 ${m.target.widthM}×${m.target.heightM} m</div>` +
+        `<h3>${m.name}</h3><div class="sub">교전 거리 ${dMin.toLocaleString()}~${dMax.toLocaleString()} m</div>` +
         `<div class="desc">${m.briefing}</div>` +
-        `<div class="specs">바람 ${env.windSpeed} m/s · 기온 ${env.tempC}℃ · 고도 ${env.altitudeM} m · 경사 ${env.inclineDeg}°` +
-        (env.earthCurvature ? ' · 곡률/코리올리 유효' : '') + `</div>`;
-      el.onclick = () => { S.mission = m; startGame(); };
+        `<div class="specs">기온 ${cl.tempC[0]}~${cl.tempC[1]}℃ · 바람 ${cl.windSpeed[0]}~${cl.windSpeed[1]} m/s · ` +
+        `적 ${m.hostiles[0]}~${m.hostiles[1]}명` +
+        (m.civilians[1] ? ` · 민간인 최대 ${m.civilians[1]}명` : '') +
+        `<br><span style="color:var(--warn)">거리·기상·상황 매판 랜덤</span>` +
+        (m.env.earthCurvature ? ' · 곡률/코리올리 유효' : '') + `</div>`;
+      el.onclick = () => { S.map = m; startGame(); };
       ml.appendChild(el);
     }
   }
   function showStep(step) {
-    ['rifle', 'ammo', 'mission'].forEach(s =>
-      $('step-' + s).classList.toggle('hidden', s !== step));
+    ['rifle', 'rifleDetail', 'ammo', 'ammoDetail', 'mission'].forEach(x =>
+      $('step-' + x).classList.toggle('hidden', x !== step));
     if (step === 'ammo') buildAmmoMenu();
     if (step === 'mission') buildMissionMenu();
   }
-  document.querySelectorAll('.btn-back').forEach(b =>
+  document.querySelectorAll('.btn-back[data-back]').forEach(b =>
     b.onclick = () => showStep(b.dataset.back));
   $('analysis-close').onclick = () => $('analysis').classList.add('hidden');
   $('btn-retry').onclick = () => { $('result').classList.add('hidden'); startGame(); };
@@ -1561,7 +1935,7 @@
   });
   document.addEventListener('mousemove', e => {
     if (S.phase !== 'play' || S.controlMode !== 'look' || !S.pointerLocked) return;
-    const sens = 0.045 * (25 / S.mag);
+    const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
     S.aim.yaw = clamp(S.aim.yaw + e.movementX * sens, -80, 80);
     S.aim.pitch = clamp(S.aim.pitch - e.movementY * sens, -80, 80);
   });
@@ -1581,7 +1955,7 @@
     const dx = e.clientX - dragState.lastX, dy = e.clientY - dragState.lastY;
     dragState.lastX = e.clientX; dragState.lastY = e.clientY;
     if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > DRAG_THRESHOLD) dragState.moved = true;
-    const sens = 0.045 * (25 / S.mag);
+    const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
     S.aim.yaw = clamp(S.aim.yaw + dx * sens, -80, 80);
     S.aim.pitch = clamp(S.aim.pitch - dy * sens, -80, 80);
   });
@@ -1622,6 +1996,60 @@
   window.addEventListener('keyup', e => {
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') S.holdingBreath = false;
   });
+
+  /* ---------------- 모바일 터치 컨트롤 ---------------- */
+  const coarsePointer = window.matchMedia && matchMedia('(pointer: coarse)');
+  function updateTouchBar() {
+    const show = S.phase === 'play' && coarsePointer && coarsePointer.matches;
+    $('touch-bar').classList.toggle('hidden', !show);
+  }
+  {
+    let repeatTimer = null;
+    const doAct = act => {
+      switch (act) {
+        case 'fire': fire(); break;
+        case 'breath': break; // hold 처리 아래에서
+        case 'elev+': S.dial.elev++; playClick(); break;
+        case 'elev-': S.dial.elev--; playClick(); break;
+        case 'wind+': S.dial.wind++; playClick(); break;
+        case 'wind-': S.dial.wind--; playClick(); break;
+        case 'zoom+': S.mag = clamp(S.mag + 1, S.magMin || 5, 25); break;
+        case 'zoom-': S.mag = clamp(S.mag - 1, S.magMin || 5, 25); break;
+        case 'calc':
+          S.calcVisible = !S.calcVisible;
+          $('hud-calc').classList.toggle('hidden', !S.calcVisible);
+          if (S.calcVisible) S.calcSolution = computeSolution();
+          break;
+        case 'reload': reload(); break;
+        case 'menu': backToMenu(); break;
+      }
+      S.lastHudUpdate = 0;
+    };
+    const REPEATABLE = new Set(['elev+', 'elev-', 'wind+', 'wind-', 'zoom+', 'zoom-']);
+    document.querySelectorAll('#touch-bar .tc-btn').forEach(btn => {
+      const act = btn.dataset.act;
+      btn.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (S.phase !== 'play') return;
+        audio() && AC.state === 'suspended' && AC.resume();
+        startWindAmbience();
+        if (act === 'breath') { S.holdingBreath = true; btn.classList.add('on'); return; }
+        doAct(act);
+        if (REPEATABLE.has(act)) {
+          clearInterval(repeatTimer);
+          repeatTimer = setInterval(() => doAct(act), 130);
+        }
+      });
+      const end = () => {
+        clearInterval(repeatTimer); repeatTimer = null;
+        if (act === 'breath') { S.holdingBreath = false; btn.classList.remove('on'); }
+      };
+      btn.addEventListener('pointerup', end);
+      btn.addEventListener('pointercancel', end);
+      btn.addEventListener('pointerleave', end);
+      btn.addEventListener('contextmenu', e => e.preventDefault());
+    });
+  }
 
   // 계산기 열려 있으면 2초마다 현재 풍속계 값으로 갱신
   setInterval(() => {
