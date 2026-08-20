@@ -11,7 +11,7 @@
 
 (() => {
   const canvas = document.getElementById('scope-canvas');
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d');
   const $ = id => document.getElementById(id);
   const windCv = $('wind-canvas'), windCx = windCv.getContext('2d');
   const histCv = $('wind-history'), histCx = histCv.getContext('2d');
@@ -42,6 +42,10 @@
     msg: '', msgUntil: 0,
     dope: null,
     sceneSeed: 1,
+    targets: [],              // {type:'hostile'|'civilian', dh, z, down, downT, marks[]}
+    timeLeft: 0,
+    ending: false,
+    magMin: 5,
   };
 
   /* ---------------- 유틸 ---------------- */
@@ -264,15 +268,17 @@
   // assets/bg-<terrain>.jpg 가 있으면 실사 배경 사용.
   //  mradW: 사진 가로 전체가 커버하는 각도 [mrad]
   //  cFrac: 조준선(LOS) 높이에 해당하는 사진 세로 위치 (0=위) — 평지에선 지평선
+  //  mradW는 사진 속 구조물의 실제 크기(픽셀 대비)로 역산해 표적 원근과 일치시킴.
+  //  magMin: 사진 세로 커버 한계로 결정되는 최소 배율.
   const BG_META = {
-    farm:     { mradW: 100, cFrac: 0.62, xFrac: 0.80 },
-    forest:   { mradW: 90,  cFrac: 0.47 },
-    plains:   { mradW: 95,  cFrac: 0.68 },
-    mountain: { mradW: 102, cFrac: 0.55 },
-    desert:   { mradW: 100, cFrac: 0.47 },
-    tundra:   { mradW: 90,  cFrac: 0.34 },
-    kasbah:   { mradW: 100, cFrac: 0.50 },
-    _default: { mradW: 95,  cFrac: 0.46 },
+    farm:     { mradW: 80,  cFrac: 0.62, xFrac: 0.80, magMin: 7 }, // 헛간 ~9 m
+    forest:   { mradW: 70,  cFrac: 0.47, magMin: 6 },              // 유칼립투스 ~15 m
+    plains:   { mradW: 56,  cFrac: 0.68, magMin: 9 },              // 아카시아 ~7 m
+    mountain: { mradW: 140, cFrac: 0.55, magMin: 5 },              // 계곡 오두막 ~4 m
+    desert:   { mradW: 105, cFrac: 0.47, magMin: 5 },              // 야자수 ~8 m
+    tundra:   { mradW: 85,  cFrac: 0.34, magMin: 5 },              // 침엽수 ~12 m
+    kasbah:   { mradW: 75,  cFrac: 0.50, magMin: 7 },              // 건물 2~3층 ~10 m
+    _default: { mradW: 95,  cFrac: 0.46, magMin: 5 },
   };
   const BG = {};
   function tryLoadBg(terrain) {
@@ -291,7 +297,8 @@
     S.aim = { yaw: 0, pitch: 0 };
     S.dial = { elev: 0, wind: 0 };
     S.recoil = { yaw: 0, pitch: 0 };
-    S.mag = 12;
+    S.magMin = (BG_META[m.terrain] || BG_META._default).magMin || 5;
+    S.mag = clamp(12, S.magMin, 25);
     S.magazine = S.rifle.magCapacity;
     S.shots = []; S.impactMarks = []; S.puffs = [];
     S.score = 0; S.firedTotal = 0;
@@ -303,10 +310,39 @@
     S.windMeas = m.env.windSpeed; S.windDirMeas = m.env.windFromDeg;
     S.sceneSeed = [...m.id].reduce((a, c) => a + c.charCodeAt(0), 7);
     tryLoadBg(m.terrain);
+
+    // ── 다중 표적 배치: 거리 ±10%, 좌우 산개, 각도상 최소 이격 3.4 mil ──
+    S.targets = [];
+    const incl = m.env.inclineDeg * Math.PI / 180;
+    const spawn = type => {
+      for (let tries = 0; tries < 50; tries++) {
+        const Di = m.distanceM * (1 + (Math.random() * 2 - 1) * 0.10);
+        const dh = Di * Math.cos(incl);
+        const z = (Math.random() * 2 - 1) * m.distanceM * 0.03;
+        const yaw = z / dh * 1000;
+        if (Math.abs(yaw) > 26) continue;
+        if (S.targets.every(o => Math.abs(o.z / o.dh * 1000 - yaw) > 3.4)) {
+          S.targets.push({ type, dh, z, down: false, downT: 0, marks: [] });
+          return;
+        }
+      }
+      S.targets.push({
+        type, dh: m.distanceM * Math.cos(incl),
+        z: (Math.random() * 2 - 1) * m.distanceM * 0.03,
+        down: false, downT: 0, marks: [],
+      });
+    };
+    for (let i = 0; i < (m.hostiles ?? 1); i++) spawn('hostile');
+    for (let i = 0; i < (m.civilians ?? 0); i++) spawn('civilian');
+    S.timeLeft = m.timeLimitS ?? 180;
+    S.ending = false;
+
     S.phase = 'play';
     $('menu').classList.add('hidden');
+    $('result').classList.add('hidden');
     $('game').classList.remove('hidden');
-    setMsg(`임무 개시 — ${m.name} · 표적 거리 ${m.distanceM.toLocaleString()} m`, 5);
+    setMsg(`임무 개시 — ${m.name} · 적 ${m.hostiles ?? 1}` +
+      ((m.civilians ?? 0) ? ` · 민간인 ${m.civilians} (사격 금지!)` : ''), 5);
     buildDope();
     resize();
   }
@@ -315,15 +351,31 @@
     document.exitPointerLock && document.exitPointerLock();
     $('game').classList.add('hidden');
     $('analysis').classList.add('hidden');
+    $('result').classList.add('hidden');
     $('menu').classList.remove('hidden');
     showStep('rifle');
   }
   function setMsg(text, dur = 3) { S.msg = text; S.msgUntil = now() + dur; }
 
-  /* ---------------- 발사 ---------------- */
+  /* ---------------- 발사 / 판정 ---------------- */
+  // 인체 존 판정 (dy: 인체 중심(지상 0.9 m) 기준 상방 [m], dz: 우측 [m])
+  function zoneHit(dy, dz) {
+    if (Math.hypot(dz, dy - 0.76) <= 0.13) return { zone: '머리', score: 10 };
+    if (dy > 0.18 && dy <= 0.64 && Math.abs(dz) <= 0.19) return { zone: '흉부', score: 9 };
+    if (dy > -0.12 && dy <= 0.18 && Math.abs(dz) <= 0.17) return { zone: '복부', score: 7 };
+    if (dy > -0.90 && dy <= -0.12 && Math.abs(dz) <= 0.16) return { zone: '하지', score: 5 };
+    if (dy > 0.05 && dy <= 0.60 && Math.abs(dz) <= 0.30) return { zone: '팔', score: 4 };
+    return null;
+  }
+  // 수평거리 dh 지점의 지면 높이 [m]
+  function gYat(dh) {
+    const g = geom();
+    return lerp(-1.6, g.ty - 0.9, clamp(dh / g.Dh, 0, 1.15));
+  }
+
   function fire() {
     const t = now();
-    if (t < S.canFireAt || S.reloading || S.activeShot) return;
+    if (t < S.canFireAt || S.reloading || S.activeShot || S.ending) return;
     if (S.magazine <= 0) { playDry(); setMsg('탄창 비었음 — R 키로 재장전', 2.5); return; }
 
     S.magazine--;
@@ -344,53 +396,148 @@
       + gauss() * disp;
 
     const env = { ...S.mission.env, windSpeed: S.windNow, windFromDeg: S.windDirNow, coriolis: true };
+    const maxDh = Math.max(g.Dh, ...S.targets.map(tg => tg.dh)) + 25;
     const r = Ballistics.solveAtRange(ammoParams(mv), env,
-      { elevRad, azRad }, g.Dh, { dt: 0.003, recordPath: true });
+      { elevRad, azRad }, maxDh, { dt: 0.003, recordPath: true });
 
     S.recoil.pitch += S.rifle.recoilMrad * (0.7 + Math.random() * 0.5);
     S.recoil.yaw += S.rifle.recoilMrad * 0.25 * (Math.random() - 0.4);
     S.shakeT = t + 0.18;
 
-    if (!r) { setMsg('탄이 표적까지 도달하지 못했다 (탄속 소진)', 3); return; }
+    if (!r || !r.path || r.path.length < 2) {
+      setMsg('탄이 표적까지 도달하지 못했다 (탄속 소진)', 3);
+      return;
+    }
+    const path = r.path;
+    const reach = path[path.length - 1].x;
 
-    const dy = r.y - g.ty;
-    const dz = r.z;
-    const hit = Math.abs(dy) <= g.halfH && Math.abs(dz) <= g.halfW;
-    const radial = Math.hypot(dy / g.halfH, dz / g.halfW);
-    const ringScore = hit ? Math.max(5, Math.round(10 - radial * 5)) : 0;
-    const mass = S.ammo.bulletGr * 6.479891e-5;
-    const energy = 0.5 * mass * r.v * r.v;
+    // 경로 보간 + 스핀 편류/지구 곡률 보정
+    const sg = S.ammo.sgFactor ?? 1.9;
+    const curv = !!env.earthCurvature;
+    const atX = xq => {
+      let lo = 0, hi = path.length - 1;
+      if (xq >= path[hi].x) lo = hi - 1;
+      else while (hi - lo > 1) { const mid = (lo + hi) >> 1; (path[mid].x <= xq) ? lo = mid : hi = mid; }
+      const a = path[lo], b = path[lo + 1] || a;
+      const f = b.x > a.x ? clamp((xq - a.x) / (b.x - a.x), 0, 1) : 0;
+      const tt = lerp(a.t, b.t, f);
+      const spin = 1.25 * (sg + 1.2) * Math.pow(Math.max(tt, 0), 1.83) * 0.0254;
+      return {
+        y: lerp(a.y, b.y, f) + (curv ? xq * xq / (2 * 6.371e6) : 0),
+        z: lerp(a.z, b.z, f) + spin,
+        t: tt, v: lerp(a.v, b.v, f),
+      };
+    };
 
+    // 가까운 표적부터 피격 판정 (첫 명중에서 탄 정지)
+    let hitIdx = -1, hitZone = null, hitAt = null;
+    const order = S.targets.map((tg, i) => i)
+      .filter(i => !S.targets[i].down && S.targets[i].dh <= reach)
+      .sort((a, b) => S.targets[a].dh - S.targets[b].dh);
+    for (const i of order) {
+      const tg = S.targets[i];
+      const p = atX(tg.dh);
+      const dy = p.y - (gYat(tg.dh) + 0.9), dz = p.z - tg.z;
+      const zh = zoneHit(dy, dz);
+      if (zh) { hitIdx = i; hitZone = zh; hitAt = { ...p, dy, dz }; break; }
+    }
+
+    // 빗나감이면 각도상 최근접 생존 표적 기준 오차 계산
+    let missInfo = null;
+    if (hitIdx < 0) {
+      let bd = 1e9;
+      for (const tg of S.targets) {
+        if (tg.down || tg.dh > reach) continue;
+        const p = atX(tg.dh);
+        const dy = p.y - (gYat(tg.dh) + 0.9), dz = p.z - tg.z;
+        const dist = Math.hypot(dy, dz);
+        if (dist < bd) { bd = dist; missInfo = { dy, dz, dh: tg.dh, p }; }
+      }
+    }
+    const endP = atX(Math.min(g.Dh, reach));
+    const tof = hitIdx >= 0 ? hitAt.t : endP.t;
     S.activeShot = {
-      t0: t, path: r.path, tof: r.t,
-      result: { dy, dz, hit, score: ringScore, tof: r.t, vImp: r.v, energy },
+      t0: t, path, tof,
+      result: { hitIdx, hitZone, hitAt, missInfo, tof, vImp: hitIdx >= 0 ? hitAt.v : endP.v },
     };
   }
+
   function resolveShot() {
     const a = S.activeShot; if (!a) return;
+    S.activeShot = null;
     const res = a.result;
     const g = geom();
-    S.shots.push(res);
-    if (res.hit) {
-      S.score += res.score + (S.firedTotal === 1 ? 5 : 0);
-      S.impactMarks.push({ y: res.dy, z: res.dz });
-      playDing(S.mission.distanceM / 343);
-      setMsg(`명중! +${res.score}점${S.firedTotal === 1 ? ' (첫 발 보너스 +5)' : ''}` +
-        ` · 비행 ${fmt(res.tof, 2)}s · 착탄속도 ${fmt(res.vImp, 0)} m/s · ${fmt(res.energy / 1000, 2)} kJ`, 5);
+    if (res.hitIdx >= 0) {
+      const tg = S.targets[res.hitIdx];
+      tg.down = true; tg.downT = now();
+      tg.marks.push({ dy: res.hitAt.dy, dz: res.hitAt.dz });
+      if (tg.type === 'civilian') {
+        playThud(tg.dh / 343);
+        S.shots.push({ hit: true, civilian: true });
+        setMsg('민간인 피격!', 4);
+        endMission(false, '민간인 피격 — 교전 수칙 위반');
+        return;
+      }
+      playDing(tg.dh / 343);
+      const bonus = res.hitZone.zone === '머리' ? 2 : 0;
+      const pts = res.hitZone.score + bonus + (S.firedTotal === 1 ? 5 : 0);
+      S.score += pts;
+      S.shots.push({ hit: true, zone: res.hitZone.zone });
+      const remain = S.targets.filter(x => x.type === 'hostile' && !x.down).length;
+      setMsg(`${res.hitZone.zone} 명중! +${pts}점${bonus ? ' (헤드샷)' : ''}` +
+        ` · 비행 ${fmt(res.tof, 2)}s · 착탄속도 ${fmt(res.vImp, 0)} m/s · 잔여 적 ${remain}`, 4.5);
+      if (remain === 0) endMission(true, '모든 표적 제압');
     } else {
       playThud(S.mission.distanceM / 343);
-      const dirV = res.dy > 0 ? '위' : '아래';
-      const dirH = res.dz > 0 ? '오른쪽' : '왼쪽';
-      setMsg(`빗나감 — ${dirV} ${fmt(Math.abs(res.dy), 2)} m · ${dirH} ${fmt(Math.abs(res.dz), 2)} m` +
-        ` (${fmt(Math.abs(res.dy / g.Dh) * 1000, 1)}/${fmt(Math.abs(res.dz / g.Dh) * 1000, 1)} mil)`, 5);
-      S.puffs.push({
-        yawMrad: (res.dz / g.Dh) * 1000,
-        pitchMrad: (res.dy / g.Dh) * 1000,
-        t0: now(),
-      });
+      S.shots.push({ hit: false });
+      const mi = res.missInfo;
+      if (mi) {
+        const dirV = mi.dy > 0 ? '위' : '아래';
+        const dirH = mi.dz > 0 ? '오른쪽' : '왼쪽';
+        setMsg(`빗나감 — 최근접 표적 기준 ${dirV} ${fmt(Math.abs(mi.dy), 2)} m · ` +
+          `${dirH} ${fmt(Math.abs(mi.dz), 2)} m`, 4);
+        S.puffs.push({
+          yawMrad: Math.atan2(mi.p.z, mi.dh) * 1000,
+          pitchMrad: (Math.atan2(mi.p.y, mi.dh) - g.incl) * 1000,
+          t0: now(),
+        });
+      } else setMsg('빗나감', 3);
     }
-    S.activeShot = null;
   }
+
+  /* ---------------- 임무 종료 / 결과 ---------------- */
+  function endMission(success, reason) {
+    if (S.ending) return;
+    S.ending = true;
+    setTimeout(() => showResult(success, reason), success ? 1300 : 900);
+  }
+  function showResult(success, reason) {
+    S.phase = 'result';
+    document.exitPointerLock && document.exitPointerLock();
+    const hostTotal = S.targets.filter(x => x.type === 'hostile').length;
+    const hostDown = S.targets.filter(x => x.type === 'hostile' && x.down).length;
+    const hits = S.shots.filter(x => x.hit && !x.civilian).length;
+    const acc = S.firedTotal ? hits / S.firedTotal : 0;
+    const heads = S.shots.filter(x => x.zone === '머리').length;
+    const tFrac = clamp(S.timeLeft / (S.mission.timeLimitS || 180), 0, 1);
+    let grade = 'F';
+    if (success) {
+      const pts = acc * 55 + tFrac * 30 + (heads / Math.max(1, hostTotal)) * 15;
+      grade = pts >= 78 ? 'S' : pts >= 60 ? 'A' : pts >= 40 ? 'B' : 'C';
+    }
+    $('result-title').textContent = success ? '임무 완료' : `임무 실패 — ${reason}`;
+    $('result-title').classList.toggle('fail', !success);
+    $('result-grade').textContent = grade;
+    $('result-grade').classList.toggle('fail', !success);
+    $('result-stats').innerHTML = `<table>
+      <tr><td>제압한 적</td><td>${hostDown} / ${hostTotal}</td></tr>
+      <tr><td>발사 / 명중</td><td>${S.firedTotal}발 / ${hits}발 (${fmt(acc * 100, 0)}%)</td></tr>
+      <tr><td>헤드샷</td><td>${heads}</td></tr>
+      <tr><td>남은 시간</td><td>${fmt(Math.max(0, S.timeLeft), 0)}초 / ${S.mission.timeLimitS}초</td></tr>
+      <tr><td>총점</td><td>${S.score}</td></tr></table>`;
+    $('result').classList.remove('hidden');
+  }
+
   function reload() {
     if (S.reloading || S.magazine === S.rifle.magCapacity) return;
     S.reloading = true;
@@ -410,6 +557,12 @@
 
     const env = S.mission.env;
     const gust = env.gustiness || 0.2;
+
+    // ── 임무 타이머 ──
+    if (!S.ending) {
+      S.timeLeft -= dt;
+      if (S.timeLeft <= 0) { S.timeLeft = 0; endMission(false, '시간 초과'); }
+    }
 
     // ── 바람: 장주기 드리프트(기류 변화) × 단주기 돌풍 ──
     S.windNoiseT += dt;
@@ -541,14 +694,22 @@
   function updateHud() {
     const m = S.mission, env = m.env;
 
+    const tl = Math.max(0, S.timeLeft);
+    const clock = `${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')}`;
+    const hostRemain = S.targets.filter(x => x.type === 'hostile' && !x.down).length;
+    const civCount = S.targets.filter(x => x.type === 'civilian' && !x.down).length;
     $('hud-mission').innerHTML =
-      `<h4>임무</h4><b>${m.name}</b><br>${m.briefing}<br>` +
+      `<h4>임무</h4><b>${m.name}</b><br>` +
       `<span style="color:var(--dim);font-size:11.5px">` +
       `거리(레이저) <b>${m.distanceM.toLocaleString()} m</b> · 경사 ${fmt(env.inclineDeg, 0)}°<br>` +
       `기온 ${fmt(env.tempC, 0)}℃ · 습도 ${fmt(env.rhPct, 0)}% · 고도 ${env.altitudeM.toLocaleString()} m<br>` +
       `기압 ${fmt(Ballistics.pressureAtAltitude(env.altitudeM), 0)} hPa · 위도 ${fmt(env.latitudeDeg, 1)}° · 방위 ${fmt(env.fireAzimuthDeg, 0)}°` +
       (env.earthCurvature ? ' · <span class="warn">곡률 유효</span>' : '') +
-      `</span><br><span class="warn">점수 ${S.score}</span> · 발사 ${S.firedTotal} · 명중 ${S.shots.filter(s => s.hit).length}`;
+      `</span><br>` +
+      `<span class="${tl < 20 ? 'bad' : 'warn'}" style="font-size:15px;font-weight:700">⏱ ${clock}</span> · ` +
+      `적 <b>${hostRemain}</b> 남음` +
+      (civCount ? ` · <span class="bad">민간인 ${civCount} — 사격 금지</span>` : '') +
+      `<br><span class="warn">점수 ${S.score}</span> · 발사 ${S.firedTotal} · 명중 ${S.shots.filter(x => x.hit && !x.civilian).length}`;
 
     $('hud-weapon').innerHTML =
       `<h4>화기 / 선택 탄종</h4><b>${S.rifle.name}</b><br>` +
@@ -620,68 +781,58 @@
     ctx.closePath();
   }
 
-  function draw() {
-    const W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-    if (S.phase !== 'play') return;
+  /* ================================================================
+   * 렌더링: 이중 패스
+   *  패스 1 — 스코프 밖: 1× 육안 배율 주변시 (저해상 + 블러)
+   *  패스 2 — 스코프 안: 현재 배율로 확대, 선명
+   * ================================================================ */
 
+  /* 세계 렌더링 (임의 컨텍스트/배율) */
+  function renderWorld(tctx, Wv, Hv, ppmW, camYaw, camPitch, opts = {}) {
+    const prevCtx = ctx; ctx = tctx;
     const t = now();
     const g = geom();
     const m = S.mission;
     const ter = TERRAIN[m.terrain] || TERRAIN.plains;
-    const cx = W / 2, cy = H / 2;
-
-    const fovMrad = 16 / S.mag * 17.4533;
-    const ppm = H / fovMrad;
-
-    let camYaw = S.aim.yaw + S.sway.yaw + S.recoil.yaw;
-    let camPitch = S.aim.pitch + S.sway.pitch + S.recoil.pitch;
-    if (t < S.shakeT) {
-      camYaw += (Math.random() - 0.5) * 3;
-      camPitch += (Math.random() - 0.5) * 3;
-    }
-    const sx = yawMrad => cx + (yawMrad - camYaw) * ppm;
-    const sy = pitchMrad => cy - (pitchMrad - camPitch) * ppm;
+    const cx = Wv / 2, cy = Hv / 2;
+    const sx = yawMrad => cx + (yawMrad - camYaw) * ppmW;
+    const sy = pitchMrad => cy - (pitchMrad - camPitch) * ppmW;
     const relPitch = absRad => (absRad - g.incl) * 1000;
-
-    const eyeH = 1.6;
-    const groundYat = r => lerp(-eyeH, g.ty - g.halfH - 0.3, clamp(r / g.Dh, 0, 1.15));
+    const groundYat = r => lerp(-1.6, g.ty - 0.9, clamp(r / g.Dh, 0, 1.15));
     const groundPitchAt = r => relPitch(Math.atan2(groundYat(r), r));
 
-    /* ===== 배경: 사진 에셋 or 절차적 장면 ===== */
+    /* ===== 배경: 사진 or 절차적 ===== */
     const bg = BG[m.terrain];
     if (bg && bg.img) {
-      // 사진 배경: 각도 → 이미지 픽셀 매핑 (cFrac 행 = LOS 높이)
       const img = bg.img;
       const meta = BG_META[m.terrain] || BG_META._default;
-      const pxm = img.width / meta.mradW;          // 이미지 px / mrad
-      const sw = (W / ppm) * pxm;                  // 소스 폭/높이
-      const sh = (H / ppm) * pxm;
+      const pxm = img.width / meta.mradW;
+      const sw = (Wv / ppmW) * pxm;
+      const sh = (Hv / ppmW) * pxm;
       let sx0 = img.width * (meta.xFrac ?? 0.5) + camYaw * pxm - sw / 2;
       let sy0 = img.height * meta.cFrac - camPitch * pxm - sh / 2;
       sx0 = clamp(sx0, 0, Math.max(0, img.width - sw));
       sy0 = clamp(sy0, 0, Math.max(0, img.height - sh));
-      ctx.drawImage(img, sx0, sy0, Math.min(sw, img.width), Math.min(sh, img.height), 0, 0, W, H);
+      ctx.drawImage(img, sx0, sy0, Math.min(sw, img.width), Math.min(sh, img.height), 0, 0, Wv, Hv);
     } else {
       drawProceduralScene();
     }
 
     function drawProceduralScene() {
-      /* --- 하늘 --- */
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, Hv);
       skyGrad.addColorStop(0, ter.skyTop);
       skyGrad.addColorStop(1, ter.skyBot);
       ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(0, 0, Wv, Hv);
 
-      /* --- 구름 (바람 따라 흐름) --- */
+      /* 구름 (바람 따라 흐름) */
       const drift = t * (0.15 + S.windNow * 0.04);
       for (let i = 0; i < 7; i++) {
         const yawC = ((hash(S.sceneSeed + i) * 400 - 200) - drift + 200) % 400 - 200;
         const pitC = relPitch(0) + 22 + hash(S.sceneSeed + i * 3 + 1) * 60;
-        const xw = (14 + hash(i + 9) * 26) * ppm * 0.15;
+        const xw = (14 + hash(i + 9) * 26) * ppmW * 0.15;
         const x = sx(yawC), y = sy(pitC);
-        if (x < -300 || x > W + 300) continue;
+        if (x < -300 || x > Wv + 300) continue;
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
         ctx.beginPath();
         ctx.ellipse(x, y, xw * 2.6, xw * 0.7, 0, 0, TAU);
@@ -689,27 +840,27 @@
         ctx.fill();
       }
 
-      /* --- 원경 능선 (2겹) --- */
+      /* 원경 능선 */
       const peaks = ter.features.includes('peaks');
       for (let layer = 0; layer < 2; layer++) {
         const hScale = peaks ? (layer ? 9 : 16) : (layer ? 3 : 5.5);
         ctx.fillStyle = mixColor(ter.ridge, ter.haze, layer ? 0.25 : 0.55);
         ctx.beginPath();
-        ctx.moveTo(0, H);
-        for (let px = 0; px <= W; px += 8) {
-          const yawM = camYaw + (px - cx) / ppm;
+        ctx.moveTo(0, Hv);
+        for (let px = 0; px <= Wv; px += 8) {
+          const yawM = camYaw + (px - cx) / ppmW;
           const hM = Math.max(0.4,
             hScale * 0.55 + hScale * 0.45 * noise1(yawM * 0.011, 3 + layer * 4) +
             hScale * 0.3 * noise1(yawM * 0.037, 7 + layer));
           ctx.lineTo(px, sy(relPitch(0) + hM));
         }
-        ctx.lineTo(W, H);
+        ctx.lineTo(Wv, Hv);
         ctx.closePath();
         ctx.fill();
       }
 
-      /* --- 지면 (로그 간격 밴드 + 대기 원근) --- */
-      let prevY = H + 50;
+      /* 지면 밴드 */
+      let prevY = Hv + 50;
       for (let i = 0; i < 30; i++) {
         const r = 18 * Math.pow(1.215, i);
         const yPix = sy(groundPitchAt(r));
@@ -717,15 +868,15 @@
         const base = mixColor(ter.ground[0], ter.ground[2], fade * 0.7);
         const tone = 0.18 + 0.16 * noise1(i * 1.7, 4);
         ctx.fillStyle = mixColor(mixColor(base, ter.ground[1], tone), ter.haze, fade * 0.38);
-        ctx.fillRect(0, yPix, W, Math.max(0, prevY - yPix) + 2);
+        ctx.fillRect(0, yPix, Wv, Math.max(0, prevY - yPix) + 2);
         prevY = yPix;
       }
       ctx.fillStyle = mixColor(ter.ground[2], ter.haze, 0.85);
       const horizonY = sy(relPitch(0));
       const farY = sy(groundPitchAt(6000));
-      if (farY > horizonY) ctx.fillRect(0, horizonY, W, farY - horizonY);
+      if (farY > horizonY) ctx.fillRect(0, horizonY, Wv, farY - horizonY);
 
-      /* --- 사구 (사막) --- */
+      /* 사구 */
       if (ter.features.includes('dunes')) {
         for (let d = 0; d < 3; d++) {
           const rD = g.Dh * (0.45 + d * 0.28);
@@ -733,35 +884,34 @@
           ctx.fillStyle = mixColor(ter.ground[1], ter.haze, 0.2 + d * 0.2);
           ctx.beginPath();
           ctx.moveTo(0, sy(baseP) + 20);
-          for (let px = 0; px <= W; px += 10) {
-            const yawM = camYaw + (px - cx) / ppm;
+          for (let px = 0; px <= Wv; px += 10) {
+            const yawM = camYaw + (px - cx) / ppmW;
             const hM = Math.max(0, 2.2 * noise1(yawM * 0.02 + d * 9, 15 + d));
             ctx.lineTo(px, sy(baseP + hM));
           }
-          ctx.lineTo(W, sy(baseP) + 20);
+          ctx.lineTo(Wv, sy(baseP) + 20);
           ctx.closePath();
           ctx.fill();
         }
       }
 
-      /* --- 흙벽 백스톱 (forest, 사진1 스타일) --- */
+      /* 흙벽 백스톱 */
       if (ter.features.includes('berm')) {
         const rB = g.Dh + 25;
         const baseA = relPitch(Math.atan2(groundYat(rB), rB));
-        const topH = g.ty + g.halfH + 2.2; // 표적 위 ~2m
+        const topH = g.ty + 0.9 + 2.2;
         ctx.fillStyle = mixColor('#c9b189', ter.haze, 0.18);
         ctx.beginPath();
         const x0b = sx(-38), x1b = sx(38);
         ctx.moveTo(x0b, sy(baseA));
         for (let px = x0b; px <= x1b; px += 8) {
-          const yawM = camYaw + (px - cx) / ppm;
+          const yawM = camYaw + (px - cx) / ppmW;
           const topA = relPitch(Math.atan2(topH + 0.5 * noise1(yawM * 0.35, 31), rB));
           ctx.lineTo(px, sy(topA));
         }
         ctx.lineTo(x1b, sy(baseA));
         ctx.closePath();
         ctx.fill();
-        // 침식 자국
         ctx.strokeStyle = 'rgba(140,115,80,0.5)';
         ctx.lineWidth = 1;
         for (let i = 0; i < 10; i++) {
@@ -774,20 +924,20 @@
         }
       }
 
-      /* --- 소나무 스카이라인 --- */
+      /* 소나무 스카이라인 */
       if (ter.features.includes('pines')) {
         const rT = g.Dh * 1.12 + 40;
-        const baseY = ter.features.includes('berm') ? g.ty + g.halfH + 2.2 : groundYat(rT);
+        const baseY = ter.features.includes('berm') ? g.ty + 0.9 + 2.2 : groundYat(rT);
         ctx.fillStyle = mixColor('#2e4630', ter.haze, 0.3);
         for (let i = 0; i < 40; i++) {
           const yawM = -70 + i * 3.6 + hash(S.sceneSeed + i) * 2.5;
           const x = sx(yawM);
-          if (x < -40 || x > W + 40) continue;
-          const hTree = 7 + hash(S.sceneSeed * 3 + i) * 6; // 7~13 m
+          if (x < -40 || x > Wv + 40) continue;
+          const hTree = 7 + hash(S.sceneSeed * 3 + i) * 6;
           const wTree = (2.2 + hash(i + 77) * 1.6);
           const yBase = sy(relPitch(Math.atan2(baseY, rT)));
           const yTop = sy(relPitch(Math.atan2(baseY + hTree, rT)));
-          const wPx = Math.atan2(wTree, rT) * 1000 * ppm;
+          const wPx = Math.atan2(wTree, rT) * 1000 * ppmW;
           ctx.beginPath();
           ctx.moveTo(x, yTop);
           ctx.lineTo(x - wPx, yBase);
@@ -797,18 +947,16 @@
         }
       }
 
-      /* --- 헛간 (farm, 사진2 스타일) --- */
+      /* 헛간 */
       if (ter.features.includes('barn')) {
         const rBn = g.Dh * 0.92;
-        const yawBn = -30; // 좌측 (기본 시야 밖, 팬하면 보임)
-        const baseA = r => relPitch(Math.atan2(groundYat(rBn) + r, rBn));
-        const wB = Math.atan2(6, rBn) * 1000 * ppm;   // 폭 12 m
+        const yawBn = -30;
+        const baseA = r2 => relPitch(Math.atan2(groundYat(rBn) + r2, rBn));
+        const wB = Math.atan2(6, rBn) * 1000 * ppmW;
         const x = sx(yawBn);
         const yB = sy(baseA(0)), yWall = sy(baseA(4.5)), yRoof = sy(baseA(7.5));
-        // 벽
         ctx.fillStyle = mixColor('#8d3b2c', ter.haze, 0.15);
         ctx.fillRect(x - wB, yWall, wB * 2, yB - yWall);
-        // 지붕 (녹슨 함석)
         ctx.fillStyle = mixColor('#7d7466', ter.haze, 0.1);
         ctx.beginPath();
         ctx.moveTo(x - wB * 1.08, yWall);
@@ -820,7 +968,6 @@
           const fx = x - wB + (2 * wB / 7) * i;
           ctx.beginPath(); ctx.moveTo(fx, yWall); ctx.lineTo(fx, yB); ctx.stroke();
         }
-        // 문
         ctx.fillStyle = 'rgba(50,32,24,0.85)';
         ctx.fillRect(x - wB * 0.2, yWall + (yB - yWall) * 0.35, wB * 0.4, (yB - yWall) * 0.65);
       }
@@ -838,11 +985,11 @@
       const poleBotA = relPitch(Math.atan2(baseY, r));
       const yawA = Math.atan2(zOff, r) * 1000;
       const x = sx(yawA);
-      if (x < -60 || x > W + 60) continue;
+      if (x < -60 || x > Wv + 60) continue;
       ctx.strokeStyle = '#3a3f36';
-      ctx.lineWidth = Math.max(1, ppm * 0.02);
+      ctx.lineWidth = Math.max(1, ppmW * 0.02);
       ctx.beginPath(); ctx.moveTo(x, sy(poleBotA)); ctx.lineTo(x, sy(poleTopA)); ctx.stroke();
-      const flagLen = clamp(Math.abs(windZ) / 8, 0.25, 1) * (0.9 / r) * 1000 * ppm;
+      const flagLen = clamp(Math.abs(windZ) / 8, 0.25, 1) * (0.9 / r) * 1000 * ppmW;
       const dir = windZ >= 0 ? 1 : -1;
       const flut = Math.sin(t * 6 + i) * 0.2 + 1;
       const fy = sy(poleTopA);
@@ -854,31 +1001,15 @@
       ctx.closePath(); ctx.fill();
     }
 
-    /* ===== 표적 ===== */
-    const tYawHalf = Math.atan2(g.halfW, g.Dh) * 1000;
-    const tPitchHalf = Math.atan2(g.halfH, g.Dh) * 1000;
-    const tx0 = sx(-tYawHalf), tx1 = sx(tYawHalf);
-    const ty0 = sy(tPitchHalf), ty1 = sy(-tPitchHalf);
-    const standB = sy(relPitch(Math.atan2(g.ty - g.halfH - 0.35, g.Dh)));
-    ctx.strokeStyle = '#4b423a'; ctx.lineWidth = Math.max(1, (tx1 - tx0) * 0.06);
-    ctx.beginPath(); ctx.moveTo((tx0 + tx1) / 2, standB); ctx.lineTo((tx0 + tx1) / 2, ty1); ctx.stroke();
-    ctx.fillStyle = '#e8e4da';
-    ctx.strokeStyle = '#6f6a5f'; ctx.lineWidth = 1.5;
-    roundRect(tx0, ty0, tx1 - tx0, ty1 - ty0, Math.min(8, (tx1 - tx0) * 0.12));
-    ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = 'rgba(70,70,60,0.55)';
-    for (let ring = 1; ring <= 3; ring++) {
-      const f = ring / 4;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(
-        lerp((tx0 + tx1) / 2, tx0, f), lerp((ty0 + ty1) / 2, ty0, f),
-        (tx1 - tx0) * f, (ty1 - ty0) * f);
-    }
-    for (const mk of S.impactMarks) {
-      const mx = sx(Math.atan2(mk.z, g.Dh) * 1000);
-      const my = sy(Math.atan2(mk.y, g.Dh) * 1000);
-      ctx.fillStyle = '#2f2b26';
-      ctx.beginPath(); ctx.arc(mx, my, Math.max(1.5, ppm * 0.06), 0, TAU); ctx.fill();
+    /* ===== 인간형 표적지 (180 cm, 거리 비례 각크기) ===== */
+    for (const tg of S.targets) {
+      const cY = groundYat(tg.dh) + 0.9;
+      const yawC = Math.atan2(tg.z, tg.dh) * 1000;
+      const pitC = relPitch(Math.atan2(cY, tg.dh));
+      const x = sx(yawC), y = sy(pitC);
+      if (x < -120 || x > Wv + 120) continue;
+      const k = ppmW * 1000 / tg.dh; // px per meter @ 표적 거리
+      drawHuman(x, y, k, tg, t);
     }
 
     /* ===== 착탄 먼지 ===== */
@@ -890,7 +1021,7 @@
         const px = sx(p.yawMrad), py = sy(p.pitchMrad);
         ctx.fillStyle = `rgba(150,130,100,${0.5 * (1 - age / 2.2)})`;
         ctx.beginPath();
-        ctx.arc(px, py - age * 8, 4 + age * 14, 0, TAU);
+        ctx.arc(px, py - age * 8, (4 + age * 14) * (ppmW > 10 ? 1 : 0.4), 0, TAU);
         ctx.fill();
       }
     }
@@ -918,43 +1049,181 @@
     }
 
     /* ===== 아지랑이 ===== */
-    const mirage = clamp((m.env.tempC - 15) / 30, 0, 1) * clamp(S.mag / 25, 0.3, 1);
-    if (mirage > 0.05) {
-      ctx.save();
-      ctx.globalAlpha = mirage * 0.16;
-      const hzY = sy(relPitch(0));
-      for (let i = 0; i < 4; i++) {
-        const yy = hzY + 30 + i * 42 + Math.sin(t * 2.4 + i) * 3;
-        ctx.drawImage(canvas, 0, yy, W, 12, Math.sin(t * 3.5 + i * 1.8) * 3.5, yy, W, 12);
+    if (opts.mirage) {
+      const mirage = clamp((m.env.tempC - 15) / 30, 0, 1) * clamp(S.mag / 25, 0.3, 1);
+      if (mirage > 0.05) {
+        ctx.save();
+        ctx.globalAlpha = mirage * 0.16;
+        const hzY = sy(relPitch(0));
+        for (let i = 0; i < 4; i++) {
+          const yy = hzY + 30 + i * 42 + Math.sin(t * 2.4 + i) * 3;
+          ctx.drawImage(ctx.canvas, 0, yy, Wv, 12, Math.sin(t * 3.5 + i * 1.8) * 3.5, yy, Wv, 12);
+        }
+        ctx.restore();
       }
-      ctx.restore();
     }
 
-    /* ===== 스코프 프레임 ===== */
-    const R = Math.min(W, H) * 0.47;
-    // 렌즈 밖 마스크
+    ctx = prevCtx;
+  }
+
+  /* 인간형 표적지: 적(무장 실루엣) / 민간인(손 든 밝은 실루엣) */
+  function drawHuman(x, y, k, tg, t) {
+    const civ = tg.type === 'civilian';
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, W, H);
-    ctx.arc(cx, cy, R, 0, TAU, true);
-    ctx.fillStyle = '#070808';
-    ctx.fill('evenodd');
+    ctx.translate(x, y);
+    if (tg.down) {
+      const age = t - (tg.downT || t);
+      const fall = Math.min(1, age * 2.2);
+      ctx.globalAlpha = 1 - 0.45 * fall;
+      ctx.translate(0, 0.9 * k);
+      ctx.rotate((civ ? -1 : 1) * fall * Math.PI / 2 * 0.92);
+      ctx.translate(0, -0.9 * k);
+    }
+    const fill = civ ? '#e6dfcd' : '#31363c';
+    const line = civ ? '#8a8168' : '#15181b';
+    const rr = (x0, y0, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x0 + r, y0);
+      ctx.arcTo(x0 + w, y0, x0 + w, y0 + h, r);
+      ctx.arcTo(x0 + w, y0 + h, x0, y0 + h, r);
+      ctx.arcTo(x0, y0 + h, x0, y0, r);
+      ctx.arcTo(x0, y0, x0 + w, y0, r);
+      ctx.closePath();
+    };
+    // 표적지 받침대
+    ctx.strokeStyle = '#4b423a';
+    ctx.lineWidth = Math.max(1, 0.03 * k);
+    ctx.beginPath(); ctx.moveTo(-0.30 * k, 0.9 * k); ctx.lineTo(0.30 * k, 0.9 * k); ctx.stroke();
+    ctx.fillStyle = fill; ctx.strokeStyle = line;
+    ctx.lineWidth = Math.max(1, 0.02 * k);
+    // 몸통 (+0.64 ~ -0.12 m)
+    rr(-0.20 * k, -0.64 * k, 0.40 * k, 0.76 * k, 0.07 * k);
+    ctx.fill(); ctx.stroke();
+    // 골반 / 다리
+    ctx.fillRect(-0.17 * k, 0.12 * k, 0.34 * k, 0.20 * k);
+    ctx.fillRect(-0.15 * k, 0.32 * k, 0.12 * k, 0.58 * k);
+    ctx.fillRect(0.03 * k, 0.32 * k, 0.12 * k, 0.58 * k);
+    // 머리
+    ctx.beginPath(); ctx.arc(0, -0.76 * k, 0.11 * k, 0, TAU); ctx.fill(); ctx.stroke();
+    if (civ) {
+      // 두 손 든 자세
+      ctx.fillRect(-0.29 * k, -0.98 * k, 0.09 * k, 0.44 * k);
+      ctx.fillRect(0.20 * k, -0.98 * k, 0.09 * k, 0.44 * k);
+    } else {
+      // 가슴 앞 대각 소총
+      ctx.strokeStyle = '#0c0e10';
+      ctx.lineWidth = 0.07 * k;
+      ctx.beginPath();
+      ctx.moveTo(-0.32 * k, 0.08 * k);
+      ctx.lineTo(0.36 * k, -0.30 * k);
+      ctx.stroke();
+    }
+    // 피탄 흔적
+    for (const mk of tg.marks) {
+      ctx.fillStyle = civ ? '#b03a2e' : '#0d0f11';
+      ctx.beginPath();
+      ctx.arc(mk.dz * k, -mk.dy * k, Math.max(1.5, 0.035 * k), 0, TAU);
+      ctx.fill();
+    }
     ctx.restore();
-    // 렌즈 링 (금속)
-    ctx.strokeStyle = '#1a1c1a'; ctx.lineWidth = 14;
-    ctx.beginPath(); ctx.arc(cx, cy, R + 5, 0, TAU); ctx.stroke();
-    ctx.strokeStyle = '#2c2f2c'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(cx, cy, R + 13, 0, TAU); ctx.stroke();
-    // 비네팅 + 가장자리 수차
+  }
+
+  /* 스코프 밖 주변시: 1× 배율, 저해상 렌더 후 블러 */
+  let outCv = null;
+  function drawOuter(W, H, camYaw, camPitch) {
+    const W2 = Math.max(2, W >> 1), H2 = Math.max(2, H >> 1);
+    if (!outCv) outCv = document.createElement('canvas');
+    if (outCv.width !== W2 || outCv.height !== H2) { outCv.width = W2; outCv.height = H2; }
+    const octx = outCv.getContext('2d');
+    const m = S.mission;
+    const bg = BG[m.terrain];
+    if (bg && bg.img) {
+      // 사진: 화면 커버 + 미세 시차 (1× 근사)
+      const img = bg.img;
+      const meta = BG_META[m.terrain] || BG_META._default;
+      const sc = Math.max(W2 / img.width, H2 / img.height) * 1.12;
+      let dx = W2 / 2 - img.width * sc * (meta.xFrac ?? 0.5) - camYaw * 0.35;
+      let dy = H2 / 2 - img.height * sc * meta.cFrac + camPitch * 0.35;
+      dx = clamp(dx, W2 - img.width * sc, 0);
+      dy = clamp(dy, H2 - img.height * sc, 0);
+      octx.drawImage(img, dx, dy, img.width * sc, img.height * sc);
+    } else {
+      const ppmOut = H2 / 420; // 1× 육안 수직 시야 ≈ 24°
+      renderWorld(octx, W2, H2, ppmOut, camYaw, camPitch, { mirage: false });
+    }
+    ctx.save();
+    ctx.filter = 'blur(6px) brightness(0.8) saturate(0.9)';
+    ctx.drawImage(outCv, 0, 0, W, H);
+    ctx.filter = 'none';
+    ctx.restore();
+  }
+
+  /* 스코프 경통 / 접안 고무링 (절차적) */
+  function drawScopeBody(cx, cy, R) {
+    const annulus = (r0, r1, style) => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r1, 0, TAU);
+      ctx.arc(cx, cy, r0, 0, TAU, true);
+      ctx.fillStyle = style;
+      ctx.fill();
+    };
+    // 렌즈 베젤
+    annulus(R, R * 1.045, '#08090a');
+    // 접안 고무링
+    const rub = ctx.createRadialGradient(cx, cy, R * 1.045, cx, cy, R * 1.14);
+    rub.addColorStop(0, '#1d1e1d');
+    rub.addColorStop(0.45, '#111211');
+    rub.addColorStop(1, '#050606');
+    annulus(R * 1.045, R * 1.14, rub);
+    // 경통
+    annulus(R * 1.14, R * 1.21, '#161716');
+    // 상단 좌측 금속 하이라이트
+    ctx.beginPath();
+    ctx.arc(cx, cy, R * 1.175, Math.PI * 0.9, Math.PI * 1.45);
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = R * 0.05;
+    ctx.stroke();
+    // 렌즈 코팅 반사
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 1.5, Math.PI * 1.05, Math.PI * 1.5);
+    ctx.strokeStyle = 'rgba(150,200,230,0.13)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
+  function draw() {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    if (S.phase !== 'play' && S.phase !== 'result') return;
+
+    const t = now();
+    const cx = W / 2, cy = H / 2;
+    const fovMrad = 16 / S.mag * 17.4533;
+    const ppm = H / fovMrad;
+
+    let camYaw = S.aim.yaw + S.sway.yaw + S.recoil.yaw;
+    let camPitch = S.aim.pitch + S.sway.pitch + S.recoil.pitch;
+    if (t < S.shakeT) {
+      camYaw += (Math.random() - 0.5) * 3;
+      camPitch += (Math.random() - 0.5) * 3;
+    }
+
+    /* ── 패스 1: 스코프 밖 (1× 흐린 주변시) ── */
+    drawOuter(W, H, camYaw, camPitch);
+
+    /* ── 패스 2: 스코프 안 (확대·선명) ── */
+    const R = Math.min(W, H) * 0.44;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
+    renderWorld(ctx, W, H, ppm, camYaw, camPitch, { mirage: true });
+    // 비네팅
     const vig = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
     vig.addColorStop(0, 'rgba(0,0,0,0)');
     vig.addColorStop(0.85, 'rgba(0,0,0,0.25)');
     vig.addColorStop(1, 'rgba(0,0,0,0.6)');
     ctx.fillStyle = vig;
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
     // 렌즈 글레어
-    ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
     const glr = ctx.createLinearGradient(cx - R, cy - R, cx + R * 0.4, cy + R * 0.4);
     glr.addColorStop(0, 'rgba(255,255,255,0.10)');
     glr.addColorStop(0.25, 'rgba(255,255,255,0)');
@@ -962,16 +1231,13 @@
     ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
     ctx.restore();
 
-    /* --- 레티클 (FFP 크리스마스트리) --- */
+    /* ── 스코프 경통 + 레티클 + 터렛 + LED ── */
+    drawScopeBody(cx, cy, R);
     drawReticle(cx, cy, R, ppm);
-
-    /* --- 터렛 노브 --- */
     drawTurrets(cx, cy, R);
+    drawLed(cx, cy, R, S.mission);
 
-    /* --- 스코프 내부 LED 표시 (사진2 스타일) --- */
-    drawLed(cx, cy, R, m);
-
-    if (!S.pointerLocked) {
+    if (!S.pointerLocked && S.phase === 'play') {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(cx - 190, cy + R * 0.55 - 20, 380, 40);
       ctx.fillStyle = '#d9ecd9';
@@ -1258,6 +1524,8 @@
   document.querySelectorAll('.btn-back').forEach(b =>
     b.onclick = () => showStep(b.dataset.back));
   $('analysis-close').onclick = () => $('analysis').classList.add('hidden');
+  $('btn-retry').onclick = () => { $('result').classList.add('hidden'); startGame(); };
+  $('btn-menu').onclick = () => backToMenu();
 
   /* ---------------- 입력 ---------------- */
   canvas.addEventListener('click', () => {
@@ -1281,7 +1549,7 @@
   });
   window.addEventListener('wheel', e => {
     if (S.phase !== 'play') return;
-    S.mag = clamp(S.mag - Math.sign(e.deltaY) * 1, 5, 25);
+    S.mag = clamp(S.mag - Math.sign(e.deltaY) * 1, S.magMin || 5, 25);
   }, { passive: true });
 
   window.addEventListener('keydown', e => {
@@ -1319,6 +1587,7 @@
     draw();
     requestAnimationFrame(loop);
   }
+  window.__lm = S;
   buildMenu();
   loop();
 })();

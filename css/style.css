@@ -116,8 +116,8 @@ html, body {
   font-size: 14px; max-width: 640px;
 }
 #hud-help {
-  top: 14px; left: 50%; transform: translateX(-50%);
-  color: #5f7566; font-size: 11px; text-shadow: 0 1px 2px #000;
+  bottom: 44px; left: 50%; transform: translateX(-50%);
+  color: #6d8474; font-size: 11px; text-shadow: 0 1px 2px #000;
 }
 
 .meter { display: inline-block; width: 110px; height: 8px; background: #16211a; border-radius: 4px; overflow: hidden; vertical-align: middle; }
@@ -137,3 +137,20 @@ html, body {
 #analysis-table th { color: var(--accent); background: rgba(143, 209, 79, 0.06); font-weight: 600; }
 #analysis-table td:first-child, #analysis-table th:first-child { text-align: left; }
 #analysis-table caption { caption-side: top; text-align: left; color: var(--dim); font-size: 12px; padding-bottom: 8px; }
+
+/* ===== 임무 결과 ===== */
+.result-inner { max-width: 560px; text-align: center; padding-top: 90px; }
+#result-title { font-size: 30px; color: #eaf6ec; margin-bottom: 18px; }
+#result-title.fail { color: var(--bad); }
+#result-grade {
+  font-size: 88px; font-weight: 800; color: var(--accent);
+  line-height: 1; margin-bottom: 26px; letter-spacing: 4px;
+  text-shadow: 0 0 30px rgba(143, 209, 79, 0.35);
+}
+#result-grade.fail { color: var(--bad); text-shadow: 0 0 30px rgba(224, 92, 74, 0.35); }
+#result-stats { display: inline-block; text-align: left; }
+#result-stats table { border-collapse: collapse; font-size: 14px; }
+#result-stats td { border: 1px solid var(--line); padding: 8px 18px; }
+#result-stats td:first-child { color: var(--dim); }
+#result-stats td:last-child { text-align: right; color: #eaf6ec; font-weight: 600; }
+.result-btns { margin-top: 30px; display: flex; gap: 14px; justify-content: center; }
