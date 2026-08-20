@@ -26,6 +26,7 @@ html, body {
 /* ===== 오버레이 / 메뉴 ===== */
 .overlay {
   position: fixed; inset: 0; z-index: 30;
+  overflow-x: hidden;
   background:
     radial-gradient(1200px 600px at 50% -10%, rgba(70, 110, 70, 0.18), transparent),
     linear-gradient(180deg, #0d1410 0%, #090d0a 100%);
@@ -184,8 +185,9 @@ html, body {
 .detail-pane {
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   padding: 26px 30px; max-width: 640px; margin: 0 auto;
+  width: 100%;
 }
-.detail-pane canvas { display: block; margin: 6px auto 18px; }
+.detail-pane canvas { display: block; margin: 6px auto 18px; max-width: 100%; height: auto; }
 .detail-pane h3 { font-size: 22px; color: #eaf6ec; }
 .detail-pane .sub { color: var(--accent); font-size: 13.5px; margin-bottom: 14px; }
 .detail-pane .desc { font-size: 13.5px; line-height: 1.75; margin-bottom: 14px; }
@@ -229,3 +231,26 @@ html, body {
   background: rgba(20, 50, 70, 0.7); border-color: #4fb7d1; color: #d8f0f8;
 }
 .tc-btn.hold:active, .tc-btn.hold.on { background: rgba(40, 100, 140, 0.9); }
+
+/* ===== 좁은 화면 (세로 모바일) ===== */
+@media (max-width: 760px) {
+  .menu-inner { padding: 26px 14px 48px; }
+  .logo { font-size: 38px; letter-spacing: 4px; }
+  .tagline { font-size: 12px; }
+  .detail-pane { padding: 18px 14px; }
+  .detail-btns { flex-wrap: wrap; }
+  .icon-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .icon-card canvas { max-width: 100%; height: auto; }
+
+  /* 터치 바: 좌측 클러스터는 발사 버튼 영역을 침범하지 않게, 우측은 세로 스택 */
+  #touch-bar .tc-left { left: 8px; right: 118px; bottom: 10px; }
+  #touch-bar .tc-row { flex-wrap: wrap; gap: 6px; }
+  .tc-btn { min-width: 50px; min-height: 50px; font-size: 11px; border-radius: 10px; }
+  .tc-btn.sm { min-height: 40px; min-width: 50px; font-size: 10.5px; }
+  #touch-bar .tc-right {
+    right: 10px; bottom: 10px;
+    flex-direction: column; align-items: center; gap: 10px;
+  }
+  .tc-btn.fire { width: 78px; height: 78px; font-size: 15px; }
+  .tc-btn.hold { width: 60px; height: 60px; font-size: 10.5px; }
+}

@@ -865,7 +865,12 @@
     const sc = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
     S.stageScale = sc;
     const st = $('stage');
-    if (st) st.style.transform = `translate(-50%, -50%) scale(${sc})`;
+    if (st) {
+      st.style.transform = `translate(-50%, -50%) scale(${sc})`;
+      // 세로 화면: 게임 뷰를 상단에 붙이고 하단 여백은 터치 버튼 공간으로
+      const portrait = window.innerHeight > window.innerWidth * 1.05;
+      st.style.top = portrait ? `${(BASE_H * sc) / 2 + 6}px` : '50%';
+    }
   }
   window.addEventListener('resize', resize);
   resize();
