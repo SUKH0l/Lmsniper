@@ -200,9 +200,9 @@ const GameData = {
    * spotterErr: 관측수 제원의 오차 스케일(난이도) */
   missions: [
     {
-      id: 'training',
-      name: '훈련장 — 300 m',
-      briefing: '기초 사격 훈련. 바람이 약하고 기상이 온화하다. 낙차 보정과 스코프 조작을 익혀라.',
+      id: 'farm',
+      name: '농장 훈련 — 300 m',
+      briefing: '낡은 헛간 옆 사격 훈련장. 바람이 약하고 기상이 온화하다. 낙차 보정과 스코프 조작을 익혀라.',
       distanceM: 300,
       env: {
         tempC: 18, rhPct: 45, altitudeM: 60, pressurehPa: null,
@@ -212,7 +212,22 @@ const GameData = {
       },
       target: { widthM: 0.45, heightM: 0.75, type: 'steel' },
       spotterErr: 0.0,
-      terrain: 'plains',
+      terrain: 'farm',
+    },
+    {
+      id: 'forest',
+      name: '삼림 사대 — 600 m',
+      briefing: '소나무 숲으로 둘러싸인 사격장. 표적 뒤 흙벽(백스톱)이 착탄을 보여준다. 간헐적 측풍에 주의.',
+      distanceM: 600,
+      env: {
+        tempC: 14, rhPct: 60, altitudeM: 150, pressurehPa: null,
+        windSpeed: 3.5, windFromDeg: 130, fireAzimuthDeg: 40,
+        latitudeDeg: 37.2, inclineDeg: 0, earthCurvature: false,
+        gustiness: 0.3, lightLevel: 1.0,
+      },
+      target: { widthM: 0.45, heightM: 0.75, type: 'steel' },
+      spotterErr: 0.05,
+      terrain: 'forest',
     },
     {
       id: 'grassland',
