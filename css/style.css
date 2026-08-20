@@ -79,7 +79,7 @@ html, body {
 
 /* ===== 게임 HUD ===== */
 #game { position: fixed; inset: 0; }
-#scope-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+#scope-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 
 .hud { position: absolute; z-index: 10; font-size: 12.5px; pointer-events: none; }
 .panel {
@@ -118,7 +118,9 @@ html, body {
 #hud-help {
   bottom: 44px; left: 50%; transform: translateX(-50%);
   color: #6d8474; font-size: 11px; text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
 }
+#hud-help b { color: #93a998; }
 
 .meter { display: inline-block; width: 110px; height: 8px; background: #16211a; border-radius: 4px; overflow: hidden; vertical-align: middle; }
 .meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }

@@ -27,6 +27,7 @@
     dial: { elev: 0, wind: 0 },     // 클릭 수 (1클릭 = 0.1 mil)
     mag: 12,
     pointerLocked: false,
+    controlMode: 'drag',   // 'drag' | 'look' — C 키로 토글
     magazine: 0, canFireAt: 0, reloading: false,
     breathPhase: 0, o2: 100, holdingBreath: false, recovering: 0,
     heartRate: 70, heartPhase: 0,
@@ -344,6 +345,7 @@
     setMsg(`임무 개시 — ${m.name} · 적 ${m.hostiles ?? 1}` +
       ((m.civilians ?? 0) ? ` · 민간인 ${m.civilians} (사격 금지!)` : ''), 5);
     buildDope();
+    updateHelpText();
     resize();
   }
   function backToMenu() {
@@ -1237,7 +1239,7 @@
     drawTurrets(cx, cy, R);
     drawLed(cx, cy, R, S.mission);
 
-    if (!S.pointerLocked && S.phase === 'play') {
+    if (S.controlMode === 'look' && !S.pointerLocked && S.phase === 'play') {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(cx - 190, cy + R * 0.55 - 20, 380, 40);
       ctx.fillStyle = '#d9ecd9';
@@ -1527,9 +1529,25 @@
   $('btn-retry').onclick = () => { $('result').classList.add('hidden'); startGame(); };
   $('btn-menu').onclick = () => backToMenu();
 
-  /* ---------------- 입력 ---------------- */
+  /* ---------------- 입력: 조준 방식 (마우스룩 / 드래그) ---------------- */
+  // 'look'  — 클릭해 포인터 잠금 → 마우스 이동으로 조준 → 클릭으로 발사 (데스크톱 전용)
+  // 'drag'  — 드래그해 조준 → 짧게 탭/클릭하면 발사 (포인터 잠금 불필요, 터치도 지원)
+  function setControlMode(mode, announce = true) {
+    if (S.controlMode === mode) return;
+    S.controlMode = mode;
+    if (mode === 'drag' && S.pointerLocked) document.exitPointerLock && document.exitPointerLock();
+    updateHelpText();
+    if (announce) setMsg(mode === 'drag' ? '조준 방식: 드래그 (짧게 클릭하면 발사)' : '조준 방식: 마우스룩 (클릭해 조준 잠금)', 3);
+  }
+  function updateHelpText() {
+    $('hud-help').innerHTML = S.controlMode === 'drag'
+      ? '드래그: 조준 · 짧게 클릭: 발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 · Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석 · <b>C: 마우스룩으로 전환</b>'
+      : '클릭: 조준 잠금/발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 · Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석 · <b>C: 드래그로 전환</b>';
+  }
+
+  // ── look 모드: 클릭 → 포인터 잠금 / 잠긴 상태에서 클릭 → 발사 ──
   canvas.addEventListener('click', () => {
-    if (S.phase !== 'play') return;
+    if (S.phase !== 'play' || S.controlMode !== 'look') return;
     audio() && AC.state === 'suspended' && AC.resume();
     startWindAmbience();
     if (!S.pointerLocked) {
@@ -1542,11 +1560,39 @@
     S.pointerLocked = document.pointerLockElement === canvas;
   });
   document.addEventListener('mousemove', e => {
-    if (S.phase !== 'play' || !S.pointerLocked) return;
+    if (S.phase !== 'play' || S.controlMode !== 'look' || !S.pointerLocked) return;
     const sens = 0.045 * (25 / S.mag);
     S.aim.yaw = clamp(S.aim.yaw + e.movementX * sens, -80, 80);
     S.aim.pitch = clamp(S.aim.pitch - e.movementY * sens, -80, 80);
   });
+
+  // ── drag 모드: 드래그로 조준(포인터 잠금 불필요), 짧은 탭/클릭은 발사 ──
+  let dragState = null;
+  const DRAG_THRESHOLD = 6; // px — 이보다 적게 움직이면 "탭"으로 간주해 발사
+  canvas.addEventListener('pointerdown', e => {
+    if (S.phase !== 'play' || S.controlMode !== 'drag') return;
+    audio() && AC.state === 'suspended' && AC.resume();
+    startWindAmbience();
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    dragState = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, startX: e.clientX, startY: e.clientY, moved: false };
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (S.phase !== 'play' || S.controlMode !== 'drag' || !dragState || e.pointerId !== dragState.id) return;
+    const dx = e.clientX - dragState.lastX, dy = e.clientY - dragState.lastY;
+    dragState.lastX = e.clientX; dragState.lastY = e.clientY;
+    if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > DRAG_THRESHOLD) dragState.moved = true;
+    const sens = 0.045 * (25 / S.mag);
+    S.aim.yaw = clamp(S.aim.yaw + dx * sens, -80, 80);
+    S.aim.pitch = clamp(S.aim.pitch - dy * sens, -80, 80);
+  });
+  const endDrag = e => {
+    if (S.controlMode !== 'drag' || !dragState || (e && e.pointerId !== dragState.id)) { return; }
+    const wasTap = !dragState.moved;
+    dragState = null;
+    if (S.phase === 'play' && wasTap) fire();
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', () => { dragState = null; });
   window.addEventListener('wheel', e => {
     if (S.phase !== 'play') return;
     S.mag = clamp(S.mag - Math.sign(e.deltaY) * 1, S.magMin || 5, 25);
@@ -1563,6 +1609,7 @@
       case 'KeyR': reload(); break;
       case 'KeyM': backToMenu(); break;
       case 'KeyA': runAnalysis(); break;
+      case 'KeyC': setControlMode(S.controlMode === 'drag' ? 'look' : 'drag'); break;
       case 'Tab':
         e.preventDefault();
         S.calcVisible = !S.calcVisible;
