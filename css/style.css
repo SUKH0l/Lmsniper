@@ -1,0 +1,129 @@
+/* LMSNIPER — UI 스타일 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0b0f0d;
+  --panel: rgba(10, 16, 12, 0.82);
+  --line: #2e4034;
+  --txt: #cfe3d4;
+  --dim: #7d9484;
+  --accent: #8fd14f;
+  --warn: #e0a03c;
+  --bad: #e05c4a;
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+.hidden { display: none !important; }
+
+/* ===== 오버레이 / 메뉴 ===== */
+.overlay {
+  position: fixed; inset: 0; z-index: 30;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(70, 110, 70, 0.18), transparent),
+    linear-gradient(180deg, #0d1410 0%, #090d0a 100%);
+  overflow-y: auto;
+}
+.menu-inner {
+  max-width: 980px; margin: 0 auto; padding: 48px 24px 64px;
+}
+.logo {
+  font-size: 56px; letter-spacing: 6px; font-weight: 800; color: #e9f5ea;
+  text-align: center;
+}
+.logo span { color: var(--accent); }
+.tagline { text-align: center; color: var(--dim); margin: 6px 0 40px; letter-spacing: 2px; }
+
+.menu-step h2 {
+  font-size: 20px; color: var(--accent); margin-bottom: 16px;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px;
+}
+
+.card-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color .15s, transform .15s, background .15s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-2px); background: rgba(24, 36, 26, 0.9); }
+.card h3 { font-size: 17px; color: #eaf6ec; margin-bottom: 2px; }
+.card .sub { font-size: 12.5px; color: var(--accent); margin-bottom: 8px; }
+.card .desc { font-size: 12.5px; line-height: 1.55; color: var(--txt); margin-bottom: 10px; }
+.card .specs { font-size: 11.5px; color: var(--dim); line-height: 1.6; }
+.card .src { font-size: 10.5px; color: #5a6f60; margin-top: 8px; }
+.card .src a { color: #6f9c7c; text-decoration: none; }
+.card .src a:hover { text-decoration: underline; }
+
+.btn-back, .btn-primary {
+  margin-top: 20px;
+  background: transparent; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 8px 16px; font-size: 13px; cursor: pointer;
+}
+.btn-back:hover { color: var(--txt); border-color: var(--dim); }
+.btn-primary { color: var(--accent); border-color: var(--accent); font-size: 14px; }
+.btn-primary:hover { background: rgba(143, 209, 79, 0.12); }
+
+.menu-refs { margin-top: 48px; font-size: 11px; color: #51665a; text-align: center; line-height: 1.7; }
+
+/* ===== 게임 HUD ===== */
+#game { position: fixed; inset: 0; }
+#scope-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+
+.hud { position: absolute; z-index: 10; font-size: 12.5px; pointer-events: none; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 14px;
+  line-height: 1.65;
+  backdrop-filter: blur(3px);
+}
+.panel b { color: var(--accent); font-weight: 600; }
+.panel .warn { color: var(--warn); }
+.panel .bad { color: var(--bad); }
+.panel h4 { font-size: 12px; color: var(--dim); letter-spacing: 1.5px; margin-bottom: 4px; }
+
+#hud-mission { top: 14px; left: 14px; max-width: 300px; }
+#hud-env { top: 14px; right: 14px; min-width: 230px; }
+#hud-weapon { bottom: 14px; left: 14px; }
+#hud-body { bottom: 14px; right: 14px; min-width: 230px; }
+#hud-calc { top: 50%; right: 14px; transform: translateY(-50%); min-width: 260px; }
+#hud-log {
+  bottom: 14px; left: 50%; transform: translateX(-50%);
+  text-align: center; color: #d8ecd9; text-shadow: 0 1px 3px #000;
+  font-size: 14px; max-width: 640px;
+}
+#hud-help {
+  top: 14px; left: 50%; transform: translateX(-50%);
+  color: #5f7566; font-size: 11px; text-shadow: 0 1px 2px #000;
+}
+
+.meter { display: inline-block; width: 110px; height: 8px; background: #16211a; border-radius: 4px; overflow: hidden; vertical-align: middle; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.meter.o2 i { background: #4fb7d1; }
+.meter.hr i { background: var(--bad); }
+
+/* ===== 분석 화면 ===== */
+.analysis-inner { max-width: 1000px; }
+.analysis-note { color: var(--dim); font-size: 13px; line-height: 1.7; margin-bottom: 18px; }
+.analysis-flex { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+#scatter-canvas { background: #0e1511; border: 1px solid var(--line); border-radius: 6px; }
+#analysis-table table { border-collapse: collapse; font-size: 13px; }
+#analysis-table th, #analysis-table td {
+  border: 1px solid var(--line); padding: 7px 13px; text-align: right;
+}
+#analysis-table th { color: var(--accent); background: rgba(143, 209, 79, 0.06); font-weight: 600; }
+#analysis-table td:first-child, #analysis-table th:first-child { text-align: left; }
+#analysis-table caption { caption-side: top; text-align: left; color: var(--dim); font-size: 12px; padding-bottom: 8px; }

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LMSNIPER — 원거리 저격 탄도 시뮬레이터</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===== 메뉴 오버레이 ===== -->
+<div id="menu" class="overlay">
+  <div class="menu-inner">
+    <h1 class="logo">LM<span>SNIPER</span></h1>
+    <p class="tagline">외부탄도학 기반 원거리 저격 시뮬레이터</p>
+
+    <!-- 단계 1: 총기 선택 -->
+    <section id="step-rifle" class="menu-step">
+      <h2>1. 총기 선택</h2>
+      <div id="rifle-list" class="card-list"></div>
+    </section>
+
+    <!-- 단계 2: 탄종 선택 -->
+    <section id="step-ammo" class="menu-step hidden">
+      <h2>2. 탄종 선택</h2>
+      <div id="ammo-list" class="card-list"></div>
+      <button class="btn-back" data-back="rifle">← 총기 다시 선택</button>
+    </section>
+
+    <!-- 단계 3: 임무 선택 -->
+    <section id="step-mission" class="menu-step hidden">
+      <h2>3. 임무 선택</h2>
+      <div id="mission-list" class="card-list"></div>
+      <button class="btn-back" data-back="ammo">← 탄종 다시 선택</button>
+    </section>
+
+    <p class="menu-refs">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
+      Cranz &amp; Becker <i>Handbook of Ballistics Vol.1</i> ·
+      김건인 외 "탄도방정식을 이용한 화력 성능 분석에 관한 연구" (KSME 2017)</p>
+  </div>
+</div>
+
+<!-- ===== 게임 화면 ===== -->
+<div id="game" class="hidden">
+  <canvas id="scope-canvas"></canvas>
+
+  <!-- 좌상단: 임무 -->
+  <div id="hud-mission" class="hud panel"></div>
+
+  <!-- 우상단: 관측수 제원 -->
+  <div id="hud-env" class="hud panel"></div>
+
+  <!-- 좌하단: 총기/탄약/탄창 -->
+  <div id="hud-weapon" class="hud panel"></div>
+
+  <!-- 우하단: 터렛 / 신체 상태 -->
+  <div id="hud-body" class="hud panel"></div>
+
+  <!-- 샷 로그 -->
+  <div id="hud-log" class="hud"></div>
+
+  <!-- 탄도 계산기 (Tab) -->
+  <div id="hud-calc" class="hud panel hidden"></div>
+
+  <!-- 도움말 -->
+  <div id="hud-help" class="hud">
+    클릭: 조준 시작/발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 ·
+    Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석
+  </div>
+</div>
+
+<!-- ===== 명중률 분석 오버레이 ===== -->
+<div id="analysis" class="overlay hidden">
+  <div class="menu-inner analysis-inner">
+    <h2>명중률 분석 — 실험적 방법 vs 해석적 방법</h2>
+    <p class="analysis-note">현재 총기·탄약·기상·사수 오차 조건에서
+      탄착군(몬테카를로) 기반 <b>실험적 방법</b>과 민감도(편미분) 기반
+      <b>해석적 방법</b>으로 명중률을 예측해 비교합니다. (KSME 2017 논문 방식)</p>
+    <div class="analysis-flex">
+      <canvas id="scatter-canvas" width="520" height="420"></canvas>
+      <div id="analysis-table"></div>
+    </div>
+    <button id="analysis-close" class="btn-primary">닫기</button>
+  </div>
+</div>
+
+<script src="js/ballistics.js"></script>
+<script src="js/data.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
