@@ -78,16 +78,73 @@
     if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { } }
     return AC;
   }
+  // 짧은 기계음 도우미: 대역 통과 노이즈 버스트
+  function mechBurst(when, freq, dur, vol, q = 6) {
+    const ac = audio(); if (!ac) return;
+    const t = ac.currentTime + when;
+    const buf = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * dur * 0.25));
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = q;
+    const g = ac.createGain(); g.gain.setValueAtTime(vol, t);
+    src.connect(bp).connect(g).connect(ac.destination); src.start(t);
+  }
   function playShot() {
     const ac = audio(); if (!ac) return;
     const t = ac.currentTime;
-    const buf = ac.createBuffer(1, ac.sampleRate * 0.4, ac.sampleRate);
+    // 총성: 광대역 노이즈 + 저역 붐
+    const buf = ac.createBuffer(1, ac.sampleRate * 0.7, ac.sampleRate);
     const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ac.sampleRate * 0.05));
+    for (let i = 0; i < d.length; i++) {
+      const e = Math.exp(-i / (ac.sampleRate * 0.06)) + 0.25 * Math.exp(-i / (ac.sampleRate * 0.28));
+      d[i] = (Math.random() * 2 - 1) * e;
+    }
     const src = ac.createBufferSource(); src.buffer = buf;
-    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
-    const g = ac.createGain(); g.gain.setValueAtTime(0.7, t);
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(2600, t);
+    lp.frequency.exponentialRampToValueAtTime(500, t + 0.5);
+    const g = ac.createGain(); g.gain.setValueAtTime(0.65, t);
     src.connect(lp).connect(g).connect(ac.destination); src.start(t);
+    const o = ac.createOscillator(), og = ac.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(95, t);
+    o.frequency.exponentialRampToValueAtTime(38, t + 0.35);
+    og.gain.setValueAtTime(0.55, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    o.connect(og).connect(ac.destination); o.start(t); o.stop(t + 0.45);
+  }
+  function playClick() { mechBurst(0, 3400, 0.03, 0.18, 8); }          // 터렛 클릭
+  function playDry() { mechBurst(0, 1400, 0.05, 0.3, 5); }             // 공이치기 (빈 총)
+  function playBolt(isSemi) {
+    if (isSemi) { mechBurst(0.12, 700, 0.09, 0.35, 3); return; }       // 반자동 노리쇠 왕복
+    mechBurst(0.55, 900, 0.07, 0.3, 4);   // 볼트 열기
+    mechBurst(0.75, 650, 0.06, 0.25, 4);  // 후퇴
+    mechBurst(1.05, 800, 0.08, 0.35, 3);  // 전진·폐쇄
+  }
+  function playReload() {
+    mechBurst(0.1, 500, 0.1, 0.4, 3);     // 탄창 제거
+    mechBurst(1.4, 550, 0.1, 0.45, 3);    // 탄창 삽입
+    mechBurst(2.1, 850, 0.08, 0.35, 4);   // 노리쇠
+  }
+  // 바람 앰비언스: 저역 노이즈 루프, 풍속에 볼륨/음색 연동
+  let windAmb = null;
+  function startWindAmbience() {
+    const ac = audio(); if (!ac || windAmb) return;
+    const len = ac.sampleRate * 3;
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    let lp = 0;
+    for (let i = 0; i < len; i++) { lp += ((Math.random() * 2 - 1) - lp) * 0.04; d[i] = lp * 3; }
+    const src = ac.createBufferSource(); src.buffer = buf; src.loop = true;
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 380; bp.Q.value = 0.6;
+    const g = ac.createGain(); g.gain.value = 0;
+    src.connect(bp).connect(g).connect(ac.destination); src.start();
+    windAmb = { gain: g, filter: bp };
+  }
+  function updateWindAmbience() {
+    if (!windAmb || !AC) return;
+    const target = clamp(S.windNow / 14, 0, 1) * 0.22;
+    windAmb.gain.gain.setTargetAtTime(S.phase === 'play' ? target : 0, AC.currentTime, 0.4);
+    windAmb.filter.frequency.setTargetAtTime(280 + S.windNow * 45, AC.currentTime, 0.6);
   }
   function playDing(delay) {
     const ac = audio(); if (!ac) return;
@@ -163,7 +220,7 @@
     const g = geom();
     const p = ammoParams();
     const baseEnv = { ...S.mission.env, windSpeed: 0, coriolis: true };
-    const step = S.mission.distanceM > 1200 ? 200 : 100;
+    const step = S.mission.distanceM > 1000 ? 200 : 100;
     const maxR = Math.min(
       Math.ceil(S.mission.distanceM * 1.25 / step) * step,
       S.rifle.effectiveRangeM * 1.6);
@@ -204,9 +261,19 @@
   }
 
   /* ---------------- 배경 사진 파이프라인 ---------------- */
-  // assets/bg-<terrain>.jpg 가 있으면 사용. mradW: 사진 가로가 커버하는 각도,
-  // horizonFrac: 사진 세로에서 지평선 위치 (0=위).
-  const BG_META = { mradW: 260, horizonFrac: 0.46 };
+  // assets/bg-<terrain>.jpg 가 있으면 실사 배경 사용.
+  //  mradW: 사진 가로 전체가 커버하는 각도 [mrad]
+  //  cFrac: 조준선(LOS) 높이에 해당하는 사진 세로 위치 (0=위) — 평지에선 지평선
+  const BG_META = {
+    farm:     { mradW: 100, cFrac: 0.62, xFrac: 0.80 },
+    forest:   { mradW: 90,  cFrac: 0.47 },
+    plains:   { mradW: 95,  cFrac: 0.68 },
+    mountain: { mradW: 102, cFrac: 0.55 },
+    desert:   { mradW: 100, cFrac: 0.47 },
+    tundra:   { mradW: 90,  cFrac: 0.34 },
+    kasbah:   { mradW: 100, cFrac: 0.50 },
+    _default: { mradW: 95,  cFrac: 0.46 },
+  };
   const BG = {};
   function tryLoadBg(terrain) {
     if (BG[terrain] !== undefined) return;
@@ -257,12 +324,13 @@
   function fire() {
     const t = now();
     if (t < S.canFireAt || S.reloading || S.activeShot) return;
-    if (S.magazine <= 0) { setMsg('탄창 비었음 — R 키로 재장전', 2.5); return; }
+    if (S.magazine <= 0) { playDry(); setMsg('탄창 비었음 — R 키로 재장전', 2.5); return; }
 
     S.magazine--;
     S.firedTotal++;
     S.canFireAt = t + (S.rifle.id === 'm107a1' ? 0.6 : 1.5);
     playShot();
+    playBolt(S.rifle.id === 'm107a1');
 
     const g = geom();
     const mv = S.ammo.mv + gauss() * S.ammo.mvSd;
@@ -326,6 +394,7 @@
   function reload() {
     if (S.reloading || S.magazine === S.rifle.magCapacity) return;
     S.reloading = true;
+    playReload();
     setMsg('재장전 중...', 2.5);
     setTimeout(() => { S.magazine = S.rifle.magCapacity; S.reloading = false; setMsg('장전 완료', 1.5); }, 2500);
   }
@@ -390,6 +459,7 @@
 
     if (t - S.lastHudUpdate > 0.15) { S.lastHudUpdate = t; updateHud(); }
     drawWindMeter();
+    updateWindAmbience();
   }
 
   /* ---------------- 풍향풍속계 위젯 ---------------- */
@@ -525,6 +595,7 @@
     farm:    { skyTop: '#8cbede', skyBot: '#dcebe8', ground: ['#a4b06a', '#79854d', '#565f38'], haze: '#d7ddc2', ridge: '#5c7258', features: ['barn', 'pines'] },
     mountain:{ skyTop: '#6e9fc9', skyBot: '#d7e4ec', ground: ['#9aa38e', '#6b7a62', '#4a5844'], haze: '#c2cdc4', ridge: '#697a86', features: ['peaks'] },
     desert:  { skyTop: '#96b6d0', skyBot: '#e8d9b8', ground: ['#d9c08a', '#b89e66', '#93794a'], haze: '#e3d3ad', ridge: '#a98f63', features: ['dunes'] },
+    kasbah:  { skyTop: '#9db4c4', skyBot: '#e8d4ae', ground: ['#c9a978', '#a8865a', '#83683f'], haze: '#e0cfa6', ridge: '#96774f', features: ['dunes'] },
     tundra:  { skyTop: '#8ba7bd', skyBot: '#d5dde3', ground: ['#c3cbc0', '#98a396', '#75816f'], haze: '#d3dad6', ridge: '#8b9aa4', features: ['peaks'] },
   };
 
@@ -580,18 +651,14 @@
     /* ===== 배경: 사진 에셋 or 절차적 장면 ===== */
     const bg = BG[m.terrain];
     if (bg && bg.img) {
-      // 사진 파노라마: 각도 → 픽셀 매핑
+      // 사진 배경: 각도 → 이미지 픽셀 매핑 (cFrac 행 = LOS 높이)
       const img = bg.img;
-      const pxPerMradImg = img.width / BG_META.mradW;
-      const horizonPx = img.height * BG_META.horizonFrac;
-      // 화면이 커버하는 각도 범위
-      const yaw0 = camYaw - cx / ppm, yaw1 = camYaw + cx / ppm;
-      const pit1 = camPitch + cy / ppm, pit0 = camPitch - cy / ppm; // 상/하
-      let sx0 = img.width / 2 + yaw0 * pxPerMradImg;
-      let sy0 = horizonPx - (pit1 - relPitch(0) + relPitch(0)) * pxPerMradImg; // horizon 정렬
-      sy0 = horizonPx - pit1 * pxPerMradImg;
-      const sw = (yaw1 - yaw0) * pxPerMradImg;
-      const sh = (pit1 - pit0) * pxPerMradImg;
+      const meta = BG_META[m.terrain] || BG_META._default;
+      const pxm = img.width / meta.mradW;          // 이미지 px / mrad
+      const sw = (W / ppm) * pxm;                  // 소스 폭/높이
+      const sh = (H / ppm) * pxm;
+      let sx0 = img.width * (meta.xFrac ?? 0.5) + camYaw * pxm - sw / 2;
+      let sy0 = img.height * meta.cFrac - camPitch * pxm - sh / 2;
       sx0 = clamp(sx0, 0, Math.max(0, img.width - sw));
       sy0 = clamp(sy0, 0, Math.max(0, img.height - sh));
       ctx.drawImage(img, sx0, sy0, Math.min(sw, img.width), Math.min(sh, img.height), 0, 0, W, H);
@@ -1196,6 +1263,7 @@
   canvas.addEventListener('click', () => {
     if (S.phase !== 'play') return;
     audio() && AC.state === 'suspended' && AC.resume();
+    startWindAmbience();
     if (!S.pointerLocked) {
       canvas.requestPointerLock && canvas.requestPointerLock();
     } else {
@@ -1219,10 +1287,10 @@
   window.addEventListener('keydown', e => {
     if (S.phase !== 'play') return;
     switch (e.code) {
-      case 'ArrowUp': S.dial.elev++; e.preventDefault(); break;
-      case 'ArrowDown': S.dial.elev--; e.preventDefault(); break;
-      case 'ArrowRight': S.dial.wind++; e.preventDefault(); break;
-      case 'ArrowLeft': S.dial.wind--; e.preventDefault(); break;
+      case 'ArrowUp': S.dial.elev++; playClick(); e.preventDefault(); break;
+      case 'ArrowDown': S.dial.elev--; playClick(); e.preventDefault(); break;
+      case 'ArrowRight': S.dial.wind++; playClick(); e.preventDefault(); break;
+      case 'ArrowLeft': S.dial.wind--; playClick(); e.preventDefault(); break;
       case 'ShiftLeft': case 'ShiftRight': S.holdingBreath = true; break;
       case 'KeyR': reload(); break;
       case 'KeyM': backToMenu(); break;

@@ -260,6 +260,21 @@ const GameData = {
       terrain: 'mountain',
     },
     {
+      id: 'kasbah',
+      name: '사막 마을 감제 — 900 m',
+      briefing: '흙벽돌 마을을 내려다보는 감제 진지. 건물 사이 열기 아지랑이와 골목 바람이 탄도를 흔든다.',
+      distanceM: 900,
+      env: {
+        tempC: 33, rhPct: 15, altitudeM: 800, pressurehPa: null,
+        windSpeed: 4.5, windFromDeg: 250, fireAzimuthDeg: 170,
+        latitudeDeg: 31.0, inclineDeg: 0, earthCurvature: false,
+        gustiness: 0.45, lightLevel: 1.05,
+      },
+      target: { widthM: 0.5, heightM: 0.8, type: 'steel' },
+      spotterErr: 0.25,
+      terrain: 'kasbah',
+    },
+    {
       id: 'desert',
       name: '사막 돌풍 — 1,500 m',
       briefing: '고온 사막. 돌풍이 불규칙하고 아지랑이가 심하다. 바람이 잠잠해지는 순간을 노려라.',

@@ -49,6 +49,15 @@ KSME 2017 논문의 두 가지 명중률 예측 방법을 구현해 비교한다
 | A | 명중률 분석 |
 | M | 메뉴로 |
 
+## 에셋
+
+- `assets/bg-<환경>.jpg` — 사용자 제공 실사 배경 (farm / forest / plains /
+  mountain / desert / tundra / kasbah). 파일이 있으면 자동으로 실사 배경을
+  사용하고, 없으면 절차적 장면으로 대체된다. 각도 매핑은 `js/game.js`의
+  `BG_META`(mradW·cFrac·xFrac)로 조정.
+- 사운드는 전부 WebAudio 합성(임시): 총성·터렛 클릭·볼트/노리쇠·재장전·
+  공이치기·풍속 연동 바람 앰비언스. 실제 녹음 파일로 교체 예정.
+
 ## 총기 / 탄약
 
 총기 5종(Remington 700, Sako TRG 42, AI AXSR, Barrett M107A1, CheyTac M200)과
