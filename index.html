@@ -66,6 +66,12 @@
     <canvas id="wind-history" width="168" height="34"></canvas>
   </div>
 
+  <!-- 상단 토글: 거리 하이라이트 / 조준 방식 -->
+  <div id="hud-toggles" class="hud panel">
+    <label class="tgl"><input type="checkbox" id="tgl-hl" checked><span>거리 하이라이트</span></label>
+    <label class="tgl" id="tgl-look-row"><input type="checkbox" id="tgl-look"><span>마우스룩 조준</span></label>
+  </div>
+
   <!-- 우상단: DOPE 표 (거리/풍속별 클릭 조정) -->
   <div id="hud-dope" class="hud panel">
     <h4>DOPE — 클릭 조정표 [mil]</h4>
@@ -81,37 +87,24 @@
   <!-- 샷 로그 -->
   <div id="hud-log" class="hud"></div>
 
-  <!-- 탄도 계산기 (Tab) -->
-  <div id="hud-calc" class="hud panel hidden"></div>
-
   <!-- 도움말 (게임 시작 시 updateHelpText()가 조준 방식에 맞춰 덮어씀) -->
   <div id="hud-help" class="hud">
-    드래그: 조준 · 짧게 클릭: 발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 ·
-    Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석 · C: 조준 방식 전환
+    드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 조정 · 휠/우측 바: 배율 ·
+    Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석
   </div>
 </div><!-- /#stage -->
 
-  <!-- 모바일 터치 컨트롤 (뷰포트 고정, 스테이지 스케일과 무관) -->
+  <!-- 모바일 터치 컨트롤: 발사 버튼(꾹=숨참기+미세조준, 떼면 발사) -->
   <div id="touch-bar" class="hidden">
-    <div class="tc-left">
-      <div class="tc-row">
-        <button class="tc-btn" data-act="elev+">고각<br>▲</button>
-        <button class="tc-btn" data-act="wind-">◀<br>편차</button>
-        <button class="tc-btn" data-act="wind+">편차<br>▶</button>
-        <button class="tc-btn" data-act="elev-">고각<br>▼</button>
-      </div>
-      <div class="tc-row">
-        <button class="tc-btn sm" data-act="zoom-">－배율</button>
-        <button class="tc-btn sm" data-act="zoom+">＋배율</button>
-        <button class="tc-btn sm" data-act="calc">계산기</button>
-        <button class="tc-btn sm" data-act="reload">재장전</button>
-        <button class="tc-btn sm" data-act="menu">메뉴</button>
-      </div>
-    </div>
-    <div class="tc-right">
-      <button class="tc-btn hold" data-act="breath">숨참기<br>(꾹)</button>
-      <button class="tc-btn fire" data-act="fire">발사</button>
-    </div>
+    <button id="btn-fire" class="tc-btn fire">발사<br><span>꾹=숨참기</span></button>
+  </div>
+
+  <!-- 모바일 상단 정보바 -->
+  <div id="mobile-top" class="hidden">
+    <span id="mt-info"></span>
+    <button class="mt-btn" id="mt-hl">HL</button>
+    <button class="mt-btn" id="mt-dope">DOPE</button>
+    <button class="mt-btn" id="mt-menu">메뉴</button>
   </div>
 </div>
 

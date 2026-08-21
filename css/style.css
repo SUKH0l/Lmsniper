@@ -110,7 +110,6 @@ html, body {
 #dope-table .note { font-size: 10.5px; color: var(--dim); margin-top: 5px; text-align: left; }
 #hud-weapon { bottom: 14px; left: 14px; }
 #hud-body { bottom: 14px; right: 14px; min-width: 230px; }
-#hud-calc { bottom: 130px; right: 14px; min-width: 260px; }
 #hud-log {
   bottom: 14px; left: 50%; transform: translateX(-50%);
   text-align: center; color: #d8ecd9; text-shadow: 0 1px 3px #000;
@@ -254,3 +253,74 @@ html, body {
   .tc-btn.fire { width: 78px; height: 78px; font-size: 15px; }
   .tc-btn.hold { width: 60px; height: 60px; font-size: 10.5px; }
 }
+
+/* ===== 상단 토글 스위치 ===== */
+#hud-toggles {
+  top: 10px; right: 348px; pointer-events: auto;
+  display: flex; gap: 14px; padding: 8px 12px;
+}
+#hud-toggles .tgl {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--txt); cursor: pointer; white-space: nowrap;
+}
+#hud-toggles input[type="checkbox"] {
+  appearance: none; width: 30px; height: 16px; border-radius: 8px;
+  background: #22301f; border: 1px solid var(--line); position: relative;
+  cursor: pointer; transition: background .15s;
+}
+#hud-toggles input[type="checkbox"]::after {
+  content: ''; position: absolute; top: 1px; left: 1px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #6b8272; transition: left .15s, background .15s;
+}
+#hud-toggles input[type="checkbox"]:checked { background: rgba(143,209,79,0.35); }
+#hud-toggles input[type="checkbox"]:checked::after { left: 15px; background: var(--accent); }
+
+/* ===== 모바일 상단 정보바 (뷰포트 고정) ===== */
+#mobile-top {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 22;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  background: rgba(8, 12, 9, 0.85);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; color: #d9ecd9;
+  font-variant-numeric: tabular-nums;
+}
+#mt-info { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mt-btn {
+  background: rgba(20, 32, 22, 0.9); color: var(--txt);
+  border: 1px solid #3d5244; border-radius: 8px;
+  padding: 6px 12px; font-size: 12px; font-weight: 700;
+}
+.mt-btn:active { border-color: var(--accent); }
+
+/* 모바일에서 DOPE 표를 중앙 오버레이로 */
+#hud-dope.mobile-overlay {
+  position: fixed; top: 46px; left: 50%; right: auto;
+  transform: translateX(-50%); z-index: 23;
+  max-height: 70vh; overflow-y: auto;
+}
+
+/* 발사 버튼 (새 단일 버튼) */
+.tc-btn.fire span { font-size: 10px; font-weight: 400; color: #ffd0c8; }
+
+/* 발사 버튼 배치 (단일 버튼 구조) */
+#touch-bar .tc-btn.fire {
+  position: absolute; right: 22px; bottom: 26px;
+  width: 100px; height: 100px;
+}
+@media (max-width: 760px) {
+  #touch-bar .tc-btn.fire {
+    width: 116px; height: 116px;
+    right: 50%; transform: translateX(50%);
+    bottom: 56px; font-size: 19px;
+  }
+  #touch-bar .tc-btn.fire:active { transform: translateX(50%) scale(0.96); }
+}
+
+/* 모바일 정사각 모드: 잘려 보이는 사이드 패널 숨김 (스코프+노브+줌바만) */
+#game.mobile-sq #hud-mission, #game.mobile-sq #hud-wind,
+#game.mobile-sq #hud-weapon, #game.mobile-sq #hud-body,
+#game.mobile-sq #hud-toggles, #game.mobile-sq #hud-help,
+#game.mobile-sq #hud-dope:not(.mobile-overlay) { display: none; }
+.mt-btn.off { opacity: 0.45; }

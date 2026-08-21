@@ -48,6 +48,9 @@
     ending: false,
     magMin: 5,
     stageScale: 1,
+    assistHL: true,     // DOPE 거리 하이라이트 토글
+    fireHold: false,    // 발사 버튼 홀드(숨참기) 중
+    _uiClick: false,
   };
 
   /* ---------------- 유틸 ---------------- */
@@ -272,9 +275,9 @@
   }
   function renderDope(distHint) {
     if (!S.dope) return;
-    const D = distHint || S.mission.distanceM;
-    let best = 0, bd = 1e9;
-    S.dope.forEach((r, i) => { const d = Math.abs(r.R - D); if (d < bd) { bd = d; best = i; } });
+    const D = S.assistHL ? (distHint || S.mission.distanceM) : null;
+    let best = -1, bd = 1e9;
+    if (D != null) S.dope.forEach((r, i) => { const d = Math.abs(r.R - D); if (d < bd) { bd = d; best = i; } });
     const winds = [2, 4, 6, 8];
     let html = '<table><tr><th>거리</th><th>고각</th>' +
       winds.map(w => `<th>${w}㎧</th>`).join('') + '</tr>';
@@ -476,13 +479,19 @@
   function fire() {
     const t = now();
     if (t < S.canFireAt || S.reloading || S.activeShot || S.ending) return;
-    if (S.magazine <= 0) { playDry(); setMsg('탄창 비었음 — R 키로 재장전', 2.5); return; }
+    if (S.magazine <= 0) { playDry(); if (!S.reloading) reload(); return; }
 
     S.magazine--;
     S.firedTotal++;
     S.canFireAt = t + (S.rifle.id === 'm107a1' ? 0.6 : 1.5);
     playShot();
     playBolt(S.rifle.id === 'm107a1');
+    // 탄창 소진 시 자동 재장전 (볼트 사이클 후)
+    if (S.magazine === 0) {
+      setTimeout(() => {
+        if (S.phase === 'play' && S.magazine === 0 && !S.reloading && !S.ending) reload();
+      }, 1600);
+    }
 
     const g = geom();
     const mv = S.ammo.mv + gauss() * S.ammo.mvSd;
@@ -694,7 +703,15 @@
     S.heartPhase += dt * (S.heartRate / 60) * TAU;
     if (S.holdingBreath && S.o2 > 0 && S.recovering <= 0) {
       S.o2 = Math.max(0, S.o2 - dt * 14);
-      if (S.o2 === 0) { S.recovering = 4; S.heartRate = 105; }
+      if (S.o2 === 0) {
+        S.recovering = 4; S.heartRate = 105;
+        if (S.fireHold) { // 숨을 더 못 참으면 자동 발사
+          S.fireHold = false;
+          S.holdingBreath = false;
+          const b = $('btn-fire'); if (b) b.classList.remove('on');
+          fire();
+        }
+      }
     } else {
       S.o2 = Math.min(100, S.o2 + dt * (S.recovering > 0 ? 10 : 25));
     }
@@ -821,9 +838,9 @@
       `적 <b>${hostRemain}</b> 남음` +
       (civCount ? ` · <span class="bad">민간인 ${civCount} — 사격 금지</span>` : '') +
       `<br><span class="warn">점수 ${S.score}</span> · 발사 ${S.firedTotal} · 명중 ${S.shots.filter(x => x.hit && !x.civilian).length}`;
-    // DOPE 강조 행을 조준 중 표적 거리로
-    const hint = at ? at.dist : m.distanceM;
-    if (S._dopeHint !== hint) { S._dopeHint = hint; renderDope(hint); }
+    // DOPE 강조 행을 조준 중 표적 거리로 (하이라이트 토글 반영)
+    const hint = S.assistHL ? (at ? at.dist : m.distanceM) : -1;
+    if (S._dopeHint !== hint) { S._dopeHint = hint; renderDope(at ? at.dist : m.distanceM); }
 
     $('hud-weapon').innerHTML =
       `<h4>화기 / 선택 탄종</h4><b>${S.rifle.name}</b><br>` +
@@ -842,15 +859,12 @@
       `심박 <span class="meter hr"><i style="width:${clamp((S.heartRate - 50) / 80 * 100, 0, 100)}%"></i></span> ${fmt(S.heartRate, 0)}` +
       (S.recovering > 0 ? '<br><span class="bad">호흡 회복 중 — 조준 불안정!</span>' : '');
 
-    if (S.calcVisible) {
-      const sol = S.calcSolution;
-      $('hud-calc').innerHTML = `<h4>탄도 계산기</h4>` + (sol ?
-        `권장 엘리베이션: <b>${fmt(sol.elevMil, 1)} mil</b><br>` +
-        `권장 윈디지: <b>${fmt(sol.windMil, 1)} mil</b><br>` +
-        `예상 비행시간 ${fmt(sol.tof, 2)} s · 착탄속도 ${fmt(sol.vImpact, 0)} m/s<br>` +
-        `스핀 편류 ${fmt(sol.spinDrift * 100, 1)} cm<br>` +
-        `<span style="color:var(--dim);font-size:11px">현재 풍속계 값 기준 — 관측 오차 포함</span>`
-        : '계산 불가 (사거리 초과)');
+    // 모바일 상단 정보바
+    if (!$('mobile-top').classList.contains('hidden')) {
+      $('mt-info').textContent =
+        `⏱${clock} · 적${hostRemain}` + (civCount ? `·민${civCount}` : '') +
+        ` · ${S.windMeas.toFixed(1)}㎧ ${Math.round(((S.windDirMeas % 360) + 360) % 360)}°` +
+        ` · E${(S.dial.elev * 0.1).toFixed(1)} W${(S.dial.wind * 0.1).toFixed(1)} · ${S.mag}×`;
     }
 
     $('hud-log').textContent = now() < S.msgUntil ? S.msg : '';
@@ -862,15 +876,31 @@
   function resize() {
     canvas.width = BASE_W;
     canvas.height = BASE_H;
-    const sc = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
-    S.stageScale = sc;
+    const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+    const portrait = window.innerHeight > window.innerWidth * 1.05;
+    let sc;
     const st = $('stage');
-    if (st) {
-      st.style.transform = `translate(-50%, -50%) scale(${sc})`;
-      // 세로 화면: 게임 뷰를 상단에 붙이고 하단 여백은 터치 버튼 공간으로
-      const portrait = window.innerHeight > window.innerWidth * 1.05;
-      st.style.top = portrait ? `${(BASE_H * sc) / 2 + 6}px` : '50%';
+    $('game').classList.toggle('mobile-sq', !!(coarse && portrait));
+    if (coarse && portrait) {
+      // 모바일 세로: 화면 폭 = 정사각 한 변. 스테이지 세로(900)를 그 변에 맞추고
+      // 좌우는 잘려 보이게 (조준경 비율 유지, 스코프 중심 고정)
+      const side = window.innerWidth;
+      sc = side / BASE_H;
+      if (st) {
+        st.style.transform = `translate(-50%, -50%) scale(${sc})`;
+        // 상단 정보바(34px)와 발사 버튼 영역(하단 180px) 사이 중앙에 배치
+        const top = 38, bottom = window.innerHeight - 180;
+        const half = (BASE_H * sc) / 2;
+        st.style.top = `${clamp((top + bottom) / 2, top + half, Math.max(top + half, bottom - half))}px`;
+      }
+    } else {
+      sc = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
+      if (st) {
+        st.style.transform = `translate(-50%, -50%) scale(${sc})`;
+        st.style.top = portrait ? `${(BASE_H * sc) / 2 + 6}px` : '50%';
+      }
     }
+    S.stageScale = sc;
   }
   window.addEventListener('resize', resize);
   resize();
@@ -1427,6 +1457,7 @@
     drawScopeBody(cx, cy, R);
     drawReticle(cx, cy, R, ppm);
     drawTurrets(cx, cy, R);
+    drawZoomBar();
     drawLed(cx, cy, R, S.mission);
 
     if (S.controlMode === 'look' && !S.pointerLocked && S.phase === 'play') {
@@ -1554,6 +1585,47 @@
       ctx.arcTo(x, y, x + w, y, r);
       ctx.closePath();
     }
+  }
+
+  /* 우측 배율 바 (볼륨 버튼 스타일: 위 + / 아래 −, 트랙 드래그) */
+  function drawZoomBar() {
+    const cxB = 308; // (UI_ZBAR.x0 + UI_ZBAR.x1) / 2
+    const x0 = 276, x1 = 340, w = x1 - x0;
+    const plus0 = 588, plus1 = 636, tr0 = 642, tr1 = 816, min0 = 822, min1 = 870;
+    ctx.save();
+    const btn = (y0, y1, glyph) => {
+      ctx.fillStyle = 'rgba(12, 18, 14, 0.82)';
+      ctx.strokeStyle = '#3d5244';
+      ctx.lineWidth = 1.5;
+      roundRect(x0, y0, w, y1 - y0, 9);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#cfe3d4';
+      ctx.font = '700 24px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(glyph, cxB, (y0 + y1) / 2 + 1);
+    };
+    btn(plus0, plus1, '+');
+    btn(min0, min1, '−');
+    // 트랙
+    ctx.fillStyle = 'rgba(12, 18, 14, 0.82)';
+    ctx.strokeStyle = '#3d5244';
+    roundRect(cxB - 9, tr0, 18, tr1 - tr0, 9);
+    ctx.fill(); ctx.stroke();
+    // 채움 (배율 레벨)
+    const mn = S.magMin || 5;
+    const frac = clamp((S.mag - mn) / (25 - mn), 0, 1);
+    const fillH = (tr1 - tr0 - 8) * frac;
+    if (fillH > 2) {
+      ctx.fillStyle = 'rgba(143, 209, 79, 0.8)';
+      roundRect(cxB - 5, tr1 - 4 - fillH, 10, fillH, 5);
+      ctx.fill();
+    }
+    // 현재 배율
+    ctx.fillStyle = '#cfe3d4';
+    ctx.font = '700 15px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${S.mag}×`, cxB, min1 + 18);
+    ctx.restore();
   }
 
   /* 스코프 내부 적색 LED 표시: 거리 · 풍속/풍향 */
@@ -1920,12 +1992,14 @@
   }
   function updateHelpText() {
     $('hud-help').innerHTML = S.controlMode === 'drag'
-      ? '드래그: 조준 · 짧게 클릭: 발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 · Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석 · <b>C: 마우스룩으로 전환</b>'
-      : '클릭: 조준 잠금/발사 · 휠: 배율 · ↑↓: 엘리베이션 · ←→: 윈디지 · Shift: 숨 참기 · Tab: 탄도 계산기 · M: 메뉴 · A: 명중률 분석 · <b>C: 드래그로 전환</b>';
+      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 우측 바/휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석'
+      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석';
+    const lk = $('tgl-look'); if (lk) lk.checked = S.controlMode === 'look';
   }
 
   // ── look 모드: 클릭 → 포인터 잠금 / 잠긴 상태에서 클릭 → 발사 ──
   canvas.addEventListener('click', () => {
+    if (S._uiClick) { S._uiClick = false; return; }
     if (S.phase !== 'play' || S.controlMode !== 'look') return;
     audio() && AC.state === 'suspended' && AC.resume();
     startWindAmbience();
@@ -1945,18 +2019,84 @@
     S.aim.pitch = clamp(S.aim.pitch - e.movementY * sens, -80, 80);
   });
 
-  // ── drag 모드: 드래그로 조준(포인터 잠금 불필요), 짧은 탭/클릭은 발사 ──
+  /* ── 스코프 위 직접 조작 영역 (논리 좌표 1440×900 기준) ──
+   *  상단 엘리베이션 노브: 드래그(좌우) 또는 중앙 기준 좌/우 터치
+   *  우측 윈디지 노브: 드래그(상하) 또는 중앙 기준 상/하 터치
+   *  우측 배율 바: +/− 터치 또는 트랙 드래그 (볼륨 바) */
+  const UI_KNOB_E = { x0: 600, x1: 840, y0: 0, y1: 66 };
+  const UI_KNOB_W = { x0: 1108, x1: 1200, y0: 348, y1: 552 };
+  const UI_ZBAR = { x0: 276, x1: 340, plus0: 588, plus1: 636, tr0: 642, tr1: 816, min0: 822, min1: 870 };
+  const inRect = (p, r) => p.x >= r.x0 && p.x <= r.x1 && p.y >= r.y0 && p.y <= r.y1;
+  function toLogical(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * BASE_W, y: (e.clientY - r.top) / r.height * BASE_H };
+  }
+  function setMagFromY(y) {
+    const frac = clamp(1 - (y - UI_ZBAR.tr0) / (UI_ZBAR.tr1 - UI_ZBAR.tr0), 0, 1);
+    const next = Math.round((S.magMin || 5) + frac * (25 - (S.magMin || 5)));
+    if (next !== S.mag) { S.mag = next; }
+  }
+  const KNOB_STEP = 13; // 논리 px 당 1클릭
+  let uiDrag = null; // {kind, id, sx, sy, lx, ly, acc, moved}
+  function uiPointerDown(e, p) {
+    if (inRect(p, UI_KNOB_E)) {
+      uiDrag = { kind: 'elev', id: e.pointerId, sx: p.x, sy: p.y, lx: p.x, ly: p.y, acc: 0, moved: false };
+    } else if (inRect(p, UI_KNOB_W)) {
+      uiDrag = { kind: 'wind', id: e.pointerId, sx: p.x, sy: p.y, lx: p.x, ly: p.y, acc: 0, moved: false };
+    } else if (p.x >= UI_ZBAR.x0 && p.x <= UI_ZBAR.x1 && p.y >= UI_ZBAR.plus0 && p.y <= UI_ZBAR.min1) {
+      if (p.y <= UI_ZBAR.plus1) { S.mag = clamp(S.mag + 1, S.magMin || 5, 25); }
+      else if (p.y >= UI_ZBAR.min0) { S.mag = clamp(S.mag - 1, S.magMin || 5, 25); }
+      else setMagFromY(p.y);
+      uiDrag = { kind: 'zoom', id: e.pointerId, sx: p.x, sy: p.y, moved: false };
+    } else return false;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    S.lastHudUpdate = 0;
+    return true;
+  }
+  function uiPointerMove(e, p) {
+    const u = uiDrag;
+    if (Math.hypot(p.x - u.sx, p.y - u.sy) > 8) u.moved = true;
+    if (u.kind === 'elev') {
+      u.acc += p.x - u.lx; u.lx = p.x;
+      while (u.acc >= KNOB_STEP) { S.dial.elev++; playClick(); u.acc -= KNOB_STEP; }
+      while (u.acc <= -KNOB_STEP) { S.dial.elev--; playClick(); u.acc += KNOB_STEP; }
+    } else if (u.kind === 'wind') {
+      u.acc += u.ly - p.y; u.ly = p.y;
+      while (u.acc >= KNOB_STEP) { S.dial.wind++; playClick(); u.acc -= KNOB_STEP; }
+      while (u.acc <= -KNOB_STEP) { S.dial.wind--; playClick(); u.acc += KNOB_STEP; }
+    } else if (u.kind === 'zoom' && p.y > UI_ZBAR.plus1 && p.y < UI_ZBAR.min0) {
+      setMagFromY(p.y);
+    }
+    S.lastHudUpdate = 0;
+  }
+  function uiPointerUp(p) {
+    const u = uiDrag;
+    uiDrag = null;
+    S._uiClick = true; // look 모드 click 발사 방지
+    if (u.moved) return;
+    // 탭: 중앙 기준선 기준 방향으로 1클릭
+    if (u.kind === 'elev') { p.x >= (UI_KNOB_E.x0 + UI_KNOB_E.x1) / 2 ? S.dial.elev++ : S.dial.elev--; playClick(); }
+    if (u.kind === 'wind') { p.y <= (UI_KNOB_W.y0 + UI_KNOB_W.y1) / 2 ? S.dial.wind++ : S.dial.wind--; playClick(); }
+    S.lastHudUpdate = 0;
+  }
+
+  // ── 조준: drag 모드(기본) — 드래그로 조준, 이동 없는 탭은 발사 ──
   let dragState = null;
-  const DRAG_THRESHOLD = 6; // px — 이보다 적게 움직이면 "탭"으로 간주해 발사
+  const DRAG_THRESHOLD = 6;
   canvas.addEventListener('pointerdown', e => {
-    if (S.phase !== 'play' || S.controlMode !== 'drag') return;
+    if (S.phase !== 'play') return;
     audio() && AC.state === 'suspended' && AC.resume();
     startWindAmbience();
+    const p = toLogical(e);
+    if (!S.pointerLocked && uiPointerDown(e, p)) return;
+    if (S.controlMode !== 'drag') return;
     canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
     dragState = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, startX: e.clientX, startY: e.clientY, moved: false };
   });
   canvas.addEventListener('pointermove', e => {
-    if (S.phase !== 'play' || S.controlMode !== 'drag' || !dragState || e.pointerId !== dragState.id) return;
+    if (S.phase !== 'play') return;
+    if (uiDrag && e.pointerId === uiDrag.id) { uiPointerMove(e, toLogical(e)); return; }
+    if (S.controlMode !== 'drag' || !dragState || e.pointerId !== dragState.id) return;
     const dx = e.clientX - dragState.lastX, dy = e.clientY - dragState.lastY;
     dragState.lastX = e.clientX; dragState.lastY = e.clientY;
     if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > DRAG_THRESHOLD) dragState.moved = true;
@@ -1964,14 +2104,14 @@
     S.aim.yaw = clamp(S.aim.yaw + dx * sens, -80, 80);
     S.aim.pitch = clamp(S.aim.pitch - dy * sens, -80, 80);
   });
-  const endDrag = e => {
-    if (S.controlMode !== 'drag' || !dragState || (e && e.pointerId !== dragState.id)) { return; }
+  canvas.addEventListener('pointerup', e => {
+    if (uiDrag && e.pointerId === uiDrag.id) { uiPointerUp(toLogical(e)); return; }
+    if (S.controlMode !== 'drag' || !dragState || e.pointerId !== dragState.id) return;
     const wasTap = !dragState.moved;
     dragState = null;
     if (S.phase === 'play' && wasTap) fire();
-  };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', () => { dragState = null; });
+  });
+  canvas.addEventListener('pointercancel', () => { dragState = null; uiDrag = null; });
   window.addEventListener('wheel', e => {
     if (S.phase !== 'play') return;
     S.mag = clamp(S.mag - Math.sign(e.deltaY) * 1, S.magMin || 5, 25);
@@ -1985,16 +2125,9 @@
       case 'ArrowRight': S.dial.wind++; playClick(); e.preventDefault(); break;
       case 'ArrowLeft': S.dial.wind--; playClick(); e.preventDefault(); break;
       case 'ShiftLeft': case 'ShiftRight': S.holdingBreath = true; break;
-      case 'KeyR': reload(); break;
       case 'KeyM': backToMenu(); break;
       case 'KeyA': runAnalysis(); break;
       case 'KeyC': setControlMode(S.controlMode === 'drag' ? 'look' : 'drag'); break;
-      case 'Tab':
-        e.preventDefault();
-        S.calcVisible = !S.calcVisible;
-        $('hud-calc').classList.toggle('hidden', !S.calcVisible);
-        if (S.calcVisible) S.calcSolution = computeSolution();
-        break;
     }
     S.lastHudUpdate = 0;
   });
@@ -2002,64 +2135,72 @@
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') S.holdingBreath = false;
   });
 
+  /* ---------------- 상단 토글 스위치 ---------------- */
+  $('tgl-hl').addEventListener('change', e => {
+    S.assistHL = e.target.checked;
+    S._dopeHint = null; // 다음 HUD 갱신 때 재렌더
+    renderDope(S.assistHL ? undefined : null);
+  });
+  $('tgl-look').addEventListener('change', e => {
+    setControlMode(e.target.checked ? 'look' : 'drag');
+  });
+
   /* ---------------- 모바일 터치 컨트롤 ---------------- */
   const coarsePointer = window.matchMedia && matchMedia('(pointer: coarse)');
   function updateTouchBar() {
-    const show = S.phase === 'play' && coarsePointer && coarsePointer.matches;
+    const coarse = coarsePointer && coarsePointer.matches;
+    const show = S.phase === 'play' && coarse;
     $('touch-bar').classList.toggle('hidden', !show);
+    $('mobile-top').classList.toggle('hidden', !show);
+    $('tgl-look-row').classList.toggle('hidden', !!coarse); // 터치 기기에선 마우스룩 숨김
   }
   {
-    let repeatTimer = null;
-    const doAct = act => {
-      switch (act) {
-        case 'fire': fire(); break;
-        case 'breath': break; // hold 처리 아래에서
-        case 'elev+': S.dial.elev++; playClick(); break;
-        case 'elev-': S.dial.elev--; playClick(); break;
-        case 'wind+': S.dial.wind++; playClick(); break;
-        case 'wind-': S.dial.wind--; playClick(); break;
-        case 'zoom+': S.mag = clamp(S.mag + 1, S.magMin || 5, 25); break;
-        case 'zoom-': S.mag = clamp(S.mag - 1, S.magMin || 5, 25); break;
-        case 'calc':
-          S.calcVisible = !S.calcVisible;
-          $('hud-calc').classList.toggle('hidden', !S.calcVisible);
-          if (S.calcVisible) S.calcSolution = computeSolution();
-          break;
-        case 'reload': reload(); break;
-        case 'menu': backToMenu(); break;
-      }
-      S.lastHudUpdate = 0;
+    // 발사 버튼: 꾹 누르면 숨참기 + 손가락 이동으로 미세 조준, 떼면 발사.
+    // 숨을 더 못 참게 되면(산소 소진) 자동 발사 — update()에서 처리.
+    const btn = $('btn-fire');
+    let holdPt = null;
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (S.phase !== 'play') return;
+      audio() && AC.state === 'suspended' && AC.resume();
+      startWindAmbience();
+      btn.setPointerCapture && btn.setPointerCapture(e.pointerId);
+      S.fireHold = true;
+      S.holdingBreath = true;
+      btn.classList.add('on');
+      holdPt = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    });
+    btn.addEventListener('pointermove', e => {
+      if (!holdPt || e.pointerId !== holdPt.id || S.phase !== 'play') return;
+      // 홀드 중 미세 조준 (일반 감도의 35%)
+      const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1) * 0.35;
+      S.aim.yaw = clamp(S.aim.yaw + (e.clientX - holdPt.x) * sens, -80, 80);
+      S.aim.pitch = clamp(S.aim.pitch - (e.clientY - holdPt.y) * sens, -80, 80);
+      holdPt.x = e.clientX; holdPt.y = e.clientY;
+    });
+    const release = fireNow => e => {
+      if (!holdPt || (e && e.pointerId !== holdPt.id)) return;
+      holdPt = null;
+      S.fireHold = false;
+      S.holdingBreath = false;
+      btn.classList.remove('on');
+      if (fireNow && S.phase === 'play') fire();
     };
-    const REPEATABLE = new Set(['elev+', 'elev-', 'wind+', 'wind-', 'zoom+', 'zoom-']);
-    document.querySelectorAll('#touch-bar .tc-btn').forEach(btn => {
-      const act = btn.dataset.act;
-      btn.addEventListener('pointerdown', e => {
-        e.preventDefault();
-        if (S.phase !== 'play') return;
-        audio() && AC.state === 'suspended' && AC.resume();
-        startWindAmbience();
-        if (act === 'breath') { S.holdingBreath = true; btn.classList.add('on'); return; }
-        doAct(act);
-        if (REPEATABLE.has(act)) {
-          clearInterval(repeatTimer);
-          repeatTimer = setInterval(() => doAct(act), 130);
-        }
-      });
-      const end = () => {
-        clearInterval(repeatTimer); repeatTimer = null;
-        if (act === 'breath') { S.holdingBreath = false; btn.classList.remove('on'); }
-      };
-      btn.addEventListener('pointerup', end);
-      btn.addEventListener('pointercancel', end);
-      btn.addEventListener('pointerleave', end);
-      btn.addEventListener('contextmenu', e => e.preventDefault());
+    btn.addEventListener('pointerup', release(true));
+    btn.addEventListener('pointercancel', release(false));
+    btn.addEventListener('contextmenu', e => e.preventDefault());
+    // 상단 바 버튼
+    $('mt-menu').addEventListener('click', () => backToMenu());
+    $('mt-hl').addEventListener('click', () => {
+      S.assistHL = !S.assistHL;
+      $('mt-hl').classList.toggle('off', !S.assistHL);
+      const hl = $('tgl-hl'); if (hl) hl.checked = S.assistHL;
+      S._dopeHint = null;
+    });
+    $('mt-dope').addEventListener('click', () => {
+      $('hud-dope').classList.toggle('mobile-overlay');
     });
   }
-
-  // 계산기 열려 있으면 2초마다 현재 풍속계 값으로 갱신
-  setInterval(() => {
-    if (S.phase === 'play' && S.calcVisible) S.calcSolution = computeSolution();
-  }, 2000);
 
   /* ---------------- 메인 루프 ---------------- */
   function loop() {
