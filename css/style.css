@@ -431,10 +431,14 @@ body.has-nav #mnav ~ .overlay { padding-bottom: 64px; }
 .seg-btn:hover { border-color: var(--dim); }
 .seg-btn.on { border-color: var(--accent); background: rgba(143,209,79,0.12); color: #eaf6ec; }
 .seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* 상단 HUD 미러 (데스크톱 플레이 중 전환용) */
-.seg-btn.sm { min-width: 0; min-height: 0; padding: 3px 7px; font-size: 10.5px; border-radius: 5px; }
-#hud-toggles .seg { gap: 3px; max-width: 430px; }
-#hud-toggles .tgl { gap: 6px; }
+/* 상단 HUD: 레티클 시인성 순환 버튼 (데스크톱 플레이 중 전환용) */
+.tgl-cycle {
+  background: #16211a; color: var(--txt);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 4px 10px; font-size: 11.5px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+}
+.tgl-cycle:hover { border-color: var(--accent); color: #eaf6ec; }
 
 /* ===== 세로형 컨트롤 패널 ===== */
 #ctl-panel {

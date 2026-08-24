@@ -27,7 +27,7 @@
     dial: { elev: 0, wind: 0 },     // 클릭 수 (1클릭 = 0.1 mil)
     mag: 12,
     reticle: 'mildot',              // 선택 레티클 (총기 선택 화면에서 변경)
-    retStyle: 'outline',            // 레티클 시인성 스타일 (설정 / V 키)
+    retStyle: 'bold',               // 레티클 시인성 스타일 (설정 / V 키)
     pointerLocked: false,
     controlMode: 'drag',   // 'drag' | 'look' — C 키로 토글
     magazine: 0, canFireAt: 0,
@@ -1664,7 +1664,6 @@
     drawReticle(cx, cy, R, ppm);
     drawTurrets(cx, cy, R);
     drawZoomRing(cx, cy, R);
-    drawLed(cx, cy, R, S.mission);
 
     /* ── 좌상단 최상단: 라운드 진행 점 ──
      * 테두리만 = 미진행 · 검은색 채움 = 성공 · 회색 채움 = 실패.
@@ -1746,15 +1745,15 @@
    * 검정 단색 레티클은 헛간 그늘·숲처럼 어두운 배경에서 그대로 소멸한다.
    * 마스크를 만들어 테두리(헤일로)·굵기·조명색을 합성해 대비를 확보한다. */
   const RET_STYLES = [
-    { id: 'plain',       name: '기본',        lw: 1 },
+    { id: 'bold',        name: '굵게',        lw: 2.2 },                                    // 기본값
     { id: 'outline',     name: '흰 테두리',   lw: 1,   halo: 'rgba(252,255,252,0.95)' },
-    { id: 'bold',        name: '굵게',        lw: 2.2 },
     { id: 'boldOutline', name: '굵게+테두리', lw: 2.2, halo: 'rgba(252,255,252,0.95)' },
     { id: 'glow',        name: '흰 글로우',   lw: 1,   glow: 'rgba(255,255,255,0.95)' },
     { id: 'red',         name: '적색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#ff2e1f' },
     { id: 'redCenter',   name: '중앙 조명',   lw: 1.3, halo: 'rgba(252,255,252,0.95)', center: '#ff2e1f' },
     { id: 'green',       name: '녹색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#39ff5e' },
   ];
+  const HALO_W = 0.42;   // 테두리 폭 배수 (가는 선 두께 대비)
   const RET_INK = 'rgba(8,10,8,0.95)';        // 기본 잉크 (현행과 동일)
   const retStyleDef = id =>
     RET_STYLES.find(s => s.id === (id ?? S.retStyle)) || RET_STYLES[0];
@@ -1791,9 +1790,10 @@
     ctx.save();
     ctx.beginPath(); ctx.arc(c, c, R, 0, TAU); ctx.clip();   // 클리핑은 여기서 한 번만
 
-    const paint = (color, ox = 0, oy = 0) =>
-      drawReticlePaths(c + ox, c + oy, R, ppm, type, st.lw, color, w);
-    const h = fineWidth(ppm, st.lw, w) * 0.85;               // 헤일로 오프셋
+    const wText = { ...w, textOutline: true };   // 숫자 외곽선은 코어 패스에서만
+    const paint = (color, ox = 0, oy = 0, txt) =>
+      drawReticlePaths(c + ox, c + oy, R, ppm, type, st.lw, color, txt ? wText : w);
+    const h = fineWidth(ppm, st.lw, w) * HALO_W;             // 헤일로 오프셋
     const sc = clamp(w.scale ?? S.stageScale ?? 1, 0.4, 1.25);
 
     // 1) 테두리(헤일로) — 8방향 오프셋. shadowBlur보다 선명하다.
@@ -1807,19 +1807,19 @@
       ctx.restore();
     }
     // 3) 코어
-    paint(st.core || RET_INK);
+    paint(st.core || RET_INK, 0, 0, true);
     // 4) 중앙 조명 존 — 실제 조명 스코프처럼 가운데만 발광
     if (st.center) {
       const rc = clamp(3.5 * ppm, R * 0.10, R * 0.50);
       ctx.save();
       ctx.beginPath(); ctx.arc(c, c, rc, 0, TAU); ctx.clip();
       ctx.clearRect(c - rc - 2, c - rc - 2, rc * 2 + 4, rc * 2 + 4); // 클립 안에서만 지워진다
-      for (const [ox, oy] of HALO_OFF) paint('rgba(4,6,4,0.8)', ox * h, oy * h);
+      for (const [ox, oy] of HALO_OFF) paint('rgba(4,6,4,0.85)', ox * h, oy * h);
       ctx.save();
       ctx.shadowColor = st.center; ctx.shadowBlur = clamp(4 / sc, 2, 10);
       paint(st.center);
       ctx.restore();
-      paint(st.center);
+      paint(st.center, 0, 0, true);
       ctx.restore();
     }
     ctx.restore();
@@ -1858,8 +1858,27 @@
     const ink = inkColor;
     ctx.strokeStyle = ink; ctx.fillStyle = ink;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `${Math.max(9, ppm * 0.26)}px sans-serif`;
     const fine = fineWidth(ppm, lw, w);
+    /* 눈금 숫자: 논리 10px 고정이던 것을 stageScale 역보정해 기기와 무관하게
+     * 같은 CSS 크기로 읽히게 한다 (모바일에선 기존 4.4 CSS px → 11 CSS px). */
+    const tsc = clamp(w?.scale ?? S.stageScale ?? 1, 0.4, 1.3);
+    const fontPx = Math.max(11 / tsc, ppm * 0.26);
+    ctx.font = `700 ${fontPx}px sans-serif`;
+    /* 숫자는 배경이 무엇이든 읽혀야 하므로 코어 패스에서 밝은 외곽선을 두른다.
+     * (테두리 없는 '굵게' 스타일에서도 숫자만은 확실히 보이게) */
+    const label = (s, x, y) => {
+      if (w?.textOutline) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(250,253,250,0.95)';
+        ctx.lineWidth = Math.max(2.4, fine * 0.95);
+        ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+        ctx.strokeText(s, x, y);
+        ctx.restore();
+      }
+      ctx.fillText(s, x, y);
+    };
+    // 숫자가 눈금 간격보다 커지면 겹치므로, 그 경우엔 숫자를 감춘다
+    const fits = spacing => spacing > fontPx * 1.9;
 
     const cross = () => {
       ctx.lineWidth = fine;
@@ -1892,9 +1911,9 @@
         ctx.moveTo(hx, cy - len * ppm); ctx.lineTo(hx, cy + len * ppm);
         ctx.moveTo(cx - len * ppm, hy); ctx.lineTo(cx + len * ppm, hy);
         ctx.stroke();
-        if (u % numEvery === 0 && unitPx * numEvery > 24) {
-          ctx.fillText(Math.abs(u), hx, cy + 0.62 * ppm);
-          ctx.fillText(Math.abs(u), cx + 0.55 * ppm, hy);
+        if (u % numEvery === 0 && fits(unitPx * numEvery)) {
+          label(Math.abs(u), hx, cy + 0.62 * ppm);
+          label(Math.abs(u), cx + 0.55 * ppm, hy);
         }
       }
     };
@@ -1960,11 +1979,11 @@
             ctx.moveTo(cx - len, hy); ctx.lineTo(cx + len, hy);
             ctx.stroke();
           }
-          if (a % 10 === 0 && pm > 3.5) {
-            ctx.fillText(a, cx + a * pm, cy + 0.62 * ppm);
-            ctx.fillText(a, cx - a * pm, cy + 0.62 * ppm);
-            ctx.fillText(a, cx + 0.6 * ppm, cy + a * pm);
-            ctx.fillText(a, cx + 0.6 * ppm, cy - a * pm);
+          if (a % 10 === 0 && fits(pm * 10)) {
+            label(a, cx + a * pm, cy + 0.62 * ppm);
+            label(a, cx - a * pm, cy + 0.62 * ppm);
+            label(a, cx + 0.6 * ppm, cy + a * pm);
+            label(a, cx + 0.6 * ppm, cy - a * pm);
           }
         }
         posts(62 * 0.2908882, 0.12);
@@ -1981,7 +2000,7 @@
           ctx.beginPath(); ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); ctx.stroke();
           dot(cx - hw, y, Math.max(fine * 0.9, 0.05 * ppm));
           dot(cx + hw, y, Math.max(fine * 0.9, 0.05 * ppm));
-          if (ppm > 20) ctx.fillText(d, cx + hw + 0.45 * ppm, y);
+          if (fits(ppm)) label(d, cx + hw + 0.45 * ppm, y);
         }
         posts(9, 0.28);
         break;
@@ -2008,7 +2027,7 @@
             ctx.beginPath(); ctx.moveTo(x, cy - len); ctx.lineTo(x, cy + len); ctx.stroke();
           }
         }
-        if (ppm > 22) { ctx.fillText('10', cx - 10 * ppm, cy - 0.5 * ppm); ctx.fillText('10', cx + 10 * ppm, cy - 0.5 * ppm); }
+        if (fits(ppm)) { label('10', cx - 10 * ppm, cy - 0.5 * ppm); label('10', cx + 10 * ppm, cy - 0.5 * ppm); }
         posts(10.6, 0.5, [[-1, 0], [1, 0]]);
         // 스타디아 측거 곡선: 1.7 m 표적, 2~10 (×100 m)
         const bx0 = cx - 8.6 * ppm, bx1 = cx - 1.6 * ppm, by = cy + 6.8 * ppm;
@@ -2022,12 +2041,12 @@
             n === 2 ? ctx.moveTo(x, by - h) : ctx.lineTo(x, by - h);
           }
           ctx.stroke();
-          if (ppm > 18) {
-            ctx.font = `${Math.max(8, ppm * 0.2)}px sans-serif`;
+          if (fits(ppm * 0.9)) {
+            ctx.font = `700 ${Math.max(9 / tsc, ppm * 0.2)}px sans-serif`;
             for (const n of [2, 4, 6, 8, 10]) {
-              ctx.fillText(n, lerp(bx0, bx1, (n - 2) / 8), by + 0.35 * ppm);
+              label(n, lerp(bx0, bx1, (n - 2) / 8), by + 0.35 * ppm);
             }
-            ctx.font = `${Math.max(9, ppm * 0.26)}px sans-serif`;
+            ctx.font = `700 ${fontPx}px sans-serif`;
           }
         }
         break;
@@ -2204,27 +2223,6 @@
     ctx.restore();
   }
 
-  /* 스코프 내부 적색 LED 표시: 거리 · 풍속/풍향 */
-  function drawLed(cx, cy, R, m) {
-    ctx.save();
-    ctx.font = '700 17px monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(255,40,25,0.9)';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = '#ff3b28';
-    const yLed = cy + R * 0.62;
-    const at = aimedTarget();
-    ctx.fillText(at ? `◆${at.dist}m` : `${m.distanceM}m`, cx - R * 0.33, yLed);
-    // 풍속 + 방향 화살표 (사수 기준 불어가는 방향)
-    const rel = (S.windDirMeas - m.env.fireAzimuthDeg + 180) * Math.PI / 180;
-    ctx.fillText(`${S.windMeas.toFixed(1)}㎧`, cx + R * 0.30, yLed);
-    ctx.translate(cx + R * 0.47, yLed);
-    ctx.rotate(rel);
-    ctx.beginPath();
-    ctx.moveTo(0, -9); ctx.lineTo(-5, 4); ctx.lineTo(0, 1); ctx.lineTo(5, 4);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
-  }
 
   /* ---------------- 명중률 분석 ---------------- */
   function runAnalysis() {
@@ -2502,6 +2500,7 @@
         S.reticle = ret.id;
         rg.querySelectorAll('.ret-card').forEach(x =>
           x.classList.toggle('on', x.dataset.ret === ret.id));
+        saveSettings();
       };
       rg.appendChild(card);
     }
@@ -2742,11 +2741,7 @@
       case 'KeyM': backToMenu(); break;
       case 'KeyA': runAnalysis(); break;
       case 'KeyC': setControlMode(S.controlMode === 'drag' ? 'look' : 'drag'); break;
-      case 'KeyV': { // 레티클 시인성 순환 (데스크톱은 플레이 중 설정에 못 들어간다)
-        const i = RET_STYLES.findIndex(v => v.id === S.retStyle);
-        setRetStyle(RET_STYLES[(i + 1) % RET_STYLES.length].id, true);
-        break;
-      }
+      case 'KeyV': cycleRetStyle(); break;  // 데스크톱은 플레이 중 설정에 못 들어간다
     }
     S.lastHudUpdate = 0;
   });
@@ -2759,9 +2754,11 @@
     S.assistHL = e.target.checked;
     S._dopeHint = null; // 다음 HUD 갱신 때 재렌더
     renderBallistic();
+    saveSettings();
   });
   $('tgl-look').addEventListener('change', e => {
     setControlMode(e.target.checked ? 'look' : 'drag');
+    saveSettings();
   });
 
   /* ================================================================
@@ -2850,12 +2847,40 @@
   $('lesson-back2').onclick = backToClassroom;
 
   /* ── 설정 ── */
+  /* ── 설정 저장 ──
+   * 새로고침해도 선택이 유지되도록 localStorage에 보관한다.
+   * 사생활 보호 모드 등에서 접근 자체가 예외를 던질 수 있어 전부 try로 감싼다. */
+  const LS_KEY = 'lmsniper.settings.v1';
+  function saveSettings() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        retStyle: S.retStyle, reticle: S.reticle, assistHL: S.assistHL,
+        controlMode: S.controlMode, muted: S.muted,
+      }));
+    } catch (e) { /* 저장 불가 — 이번 세션에만 적용된다 */ }
+  }
+  function loadSettings() {
+    let o;
+    try { o = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return; }
+    if (!o) return;
+    // 저장된 값이 유효할 때만 반영 (스타일 목록이 바뀌어도 안전하게)
+    if (RET_STYLES.some(v => v.id === o.retStyle)) S.retStyle = o.retStyle;
+    if (RETICLES.some(r => r.id === o.reticle)) S.reticle = o.reticle;
+    if (typeof o.assistHL === 'boolean') S.assistHL = o.assistHL;
+    if (o.controlMode === 'drag' || o.controlMode === 'look') S.controlMode = o.controlMode;
+    if (typeof o.muted === 'boolean') S.muted = o.muted;
+  }
+
   /* ── 레티클 시인성 세그먼트 (설정 + 상단 HUD 공용) ── */
-  function buildVisSeg(host, small) {
+  function buildVisSeg(host) {
     if (!host) return;
     host.innerHTML = RET_STYLES.map(v =>
-      `<button type="button" class="seg-btn${small ? ' sm' : ''}" data-v="${v.id}">${v.name}</button>`).join('');
+      `<button type="button" class="seg-btn" data-v="${v.id}">${v.name}</button>`).join('');
   }
+  const cycleRetStyle = () => {
+    const i = RET_STYLES.findIndex(v => v.id === S.retStyle);
+    setRetStyle(RET_STYLES[(i + 1) % RET_STYLES.length].id, true);
+  };
   function setRetStyle(id, announce) {
     if (!RET_STYLES.some(v => v.id === id)) return;
     S.retStyle = id;
@@ -2867,6 +2892,7 @@
       if (cv) drawReticlePreview(cv, c.dataset.ret);
     });
     if (announce) setMsg(`레티클 시인성: ${retStyleDef(id).name}`, 2);
+    saveSettings();
   }
   document.addEventListener('click', e => {
     const b = e.target.closest('.seg-btn');
@@ -2880,16 +2906,20 @@
     $('set-sound').checked = !S.muted;
     document.querySelectorAll('.seg-btn').forEach(b =>
       b.classList.toggle('on', b.dataset.v === S.retStyle));
+    const cyc = $('hud-retcycle');
+    if (cyc) cyc.textContent = `레티클: ${retStyleDef(S.retStyle).name} ▸`;
   }
+  $('hud-retcycle').addEventListener('click', cycleRetStyle);
   $('set-hl').addEventListener('change', e => {
-    S.assistHL = e.target.checked; S._dopeHint = null; syncSettingsUI();
+    S.assistHL = e.target.checked; S._dopeHint = null; syncSettingsUI(); saveSettings();
   });
   $('set-look').addEventListener('change', e => {
-    setControlMode(e.target.checked ? 'look' : 'drag');
+    setControlMode(e.target.checked ? 'look' : 'drag'); saveSettings();
   });
   $('set-sound').addEventListener('change', e => {
     S.muted = !e.target.checked;
     if (windAmb && AC) windAmb.gain.gain.setTargetAtTime(0, AC.currentTime, 0.1);
+    saveSettings();
   });
 
   /* ── 가로 모바일: 숨참기/발사 플로팅 버튼 (기존 유지) ── */
@@ -3040,11 +3070,11 @@
     requestAnimationFrame(loop);
   }
   window.__lm = S;
+  loadSettings();          // 저장된 설정을 먼저 복원한 뒤 메뉴/UI를 만든다
   buildMissionMenu();
   buildMenu();
   buildClassroom();
   buildVisSeg($('set-retstyle'));
-  buildVisSeg($('hud-retstyle'), true);
   syncSettingsUI();
   updateTouchBar();
   window.addEventListener('resize', updateTouchBar);
