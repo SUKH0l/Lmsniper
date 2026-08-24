@@ -1747,7 +1747,6 @@
   const RET_STYLES = [
     { id: 'bold',        name: '굵게',        lw: 2.2 },                                    // 기본값
     { id: 'outline',     name: '흰 테두리',   lw: 1,   halo: 'rgba(252,255,252,0.95)' },
-    { id: 'boldOutline', name: '굵게+테두리', lw: 2.2, halo: 'rgba(252,255,252,0.95)' },
     { id: 'glow',        name: '흰 글로우',   lw: 1,   glow: 'rgba(255,255,255,0.95)' },
     { id: 'red',         name: '적색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#ff2e1f' },
     { id: 'redCenter',   name: '중앙 조명',   lw: 1.3, halo: 'rgba(252,255,252,0.95)', center: '#ff2e1f' },
