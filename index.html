@@ -14,34 +14,34 @@
     <h1 class="logo">LM<span>SNIPER</span></h1>
     <p class="tagline">외부탄도학 기반 원거리 저격 시뮬레이터</p>
 
-    <!-- 단계 1: 총기 선택 (이미지+이름 그리드) -->
-    <section id="step-rifle" class="menu-step">
-      <h2>1. 총기 선택</h2>
-      <div id="rifle-list" class="icon-grid"></div>
+    <!-- 단계 1: 임무(맵) 선택 -->
+    <section id="step-mission" class="menu-step">
+      <h2>1. 임무 선택</h2>
+      <div id="mission-list" class="card-list"></div>
     </section>
 
-    <!-- 단계 1-b: 총기 상세 -->
+    <!-- 단계 2: 총기 선택 (세로 리스트: 이미지 + 이름) -->
+    <section id="step-rifle" class="menu-step hidden">
+      <h2>2. 총기 선택</h2>
+      <div id="rifle-list" class="v-list"></div>
+      <button class="btn-back" data-back="mission">← 임무 다시 선택</button>
+    </section>
+
+    <!-- 단계 2-b: 총기 상세 (+ 레티클 선택) -->
     <section id="step-rifleDetail" class="menu-step hidden">
       <div id="rifle-detail" class="detail-pane"></div>
     </section>
 
-    <!-- 단계 2: 탄종 선택 (이미지+이름 그리드) -->
+    <!-- 단계 3: 탄종 선택 (세로 리스트: 좌측 정사각 이미지 + 설명) -->
     <section id="step-ammo" class="menu-step hidden">
-      <h2>2. 탄종 선택</h2>
-      <div id="ammo-list" class="icon-grid"></div>
+      <h2>3. 탄종 선택</h2>
+      <div id="ammo-list" class="v-list"></div>
       <button class="btn-back" data-back="rifle">← 총기 다시 선택</button>
     </section>
 
-    <!-- 단계 2-b: 탄종 상세 -->
+    <!-- 단계 3-b: 탄종 상세 -->
     <section id="step-ammoDetail" class="menu-step hidden">
       <div id="ammo-detail" class="detail-pane"></div>
-    </section>
-
-    <!-- 단계 3: 임무 선택 -->
-    <section id="step-mission" class="menu-step hidden">
-      <h2>3. 임무 선택</h2>
-      <div id="mission-list" class="card-list"></div>
-      <button class="btn-back" data-back="ammo">← 탄종 다시 선택</button>
     </section>
 
     <p class="menu-refs">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
@@ -70,12 +70,13 @@
   <div id="hud-toggles" class="hud panel">
     <label class="tgl"><input type="checkbox" id="tgl-hl" checked><span>거리 하이라이트</span></label>
     <label class="tgl" id="tgl-look-row"><input type="checkbox" id="tgl-look"><span>마우스룩 조준</span></label>
+    <button class="tgl-cycle" id="hud-retcycle" title="레티클 시인성 (V)"></button>
   </div>
 
-  <!-- 우상단: DOPE 표 (거리/풍속별 클릭 조정) -->
+  <!-- 우상단: 탄도표 (거리별 낙차/편류 제원) -->
   <div id="hud-dope" class="hud panel">
-    <h4>DOPE — 클릭 조정표 [mil]</h4>
-    <div id="dope-table"></div>
+    <h4>탄도표 [mrad]</h4>
+    <div id="dope-table" class="bal-tbl"></div>
   </div>
 
   <!-- 좌하단: 총기/탄약/탄창 -->
@@ -137,11 +138,10 @@
       </div>
     </div>
     <div class="cp-page hidden" id="cp-bal">
-      <div id="bal-info"></div>
-      <div id="dope-mini"></div>
+      <div id="bal-table" class="bal-tbl tbl-scroll"></div>
     </div>
     <div class="cp-page hidden" id="cp-siz">
-      <div id="sizes-table"></div>
+      <div id="sizes-table" class="bal-tbl tbl-scroll"></div>
     </div>
   </div>
 </div>
@@ -204,6 +204,8 @@
         <input type="checkbox" id="set-look"></label>
       <label class="set-row"><span>사운드<br><small>총성·터렛 클릭·바람 소리</small></span>
         <input type="checkbox" id="set-sound" checked></label>
+      <div class="set-row set-choice"><span>레티클 시인성<br><small>배경에 묻힐 때 선 대비를 높인다 (플레이 중 V 키로도 전환)</small></span>
+        <div class="seg" id="set-retstyle"></div></div>
     </div>
     <p class="menu-refs" style="text-align:left">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
       Cranz &amp; Becker <i>Handbook of Ballistics Vol.1</i> ·

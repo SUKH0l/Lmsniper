@@ -91,6 +91,7 @@ const GameData = {
   ammo: [
     {
       id: 'gmm308_168',
+      brief: '시에라 매치킹 168gr BTHP — 최다 경기 우승 기록의 표준 매치탄.',
       name: 'Federal Gold Medal Match 168gr SMK',
       caliber: '.308 Winchester',
       bulletGr: 168,
@@ -106,6 +107,7 @@ const GameData = {
     },
     {
       id: 'gmm308_175',
+      brief: '시에라 매치킹 175gr BTHP — 장거리 안정성을 높인 중량 매치탄.',
       name: 'Federal Gold Medal Match 175gr SMK',
       caliber: '.308 Winchester',
       bulletGr: 175,
@@ -121,6 +123,7 @@ const GameData = {
     },
     {
       id: 'scenar250',
+      brief: '시나 250gr OTM — 중·장거리 경기에서 검증된 .338 표준 탄약.',
       name: 'Lapua Scenar 250gr (GB488)',
       caliber: '.338 Lapua Magnum',
       bulletGr: 250,
@@ -136,6 +139,7 @@ const GameData = {
     },
     {
       id: 'scenar300',
+      brief: '시나 300gr OTM — 높은 BC로 극한 장거리 바람에 강한 중량탄.',
       name: 'Lapua Scenar 300gr (GB528)',
       caliber: '.338 Lapua Magnum',
       bulletGr: 300,
@@ -151,6 +155,7 @@ const GameData = {
     },
     {
       id: 'amax750',
+      brief: 'A-MAX 750gr — BC(G1) 1.05의 매치급 .50 구경 정밀탄.',
       name: 'Hornady A-MAX Match 750gr',
       caliber: '.50 BMG',
       bulletGr: 750,
@@ -166,6 +171,7 @@ const GameData = {
     },
     {
       id: 'm33ball',
+      brief: '661gr FMJ 군용 볼탄 — 속도 편차가 커 정밀 사격에는 불리.',
       name: 'M33 Ball 661gr',
       caliber: '.50 BMG',
       bulletGr: 661,
@@ -181,6 +187,7 @@ const GameData = {
     },
     {
       id: 'ct419',
+      brief: '419gr 솔리드 — 2,500야드급 교전을 위한 초고 BC 선반가공 탄.',
       name: 'CheyTac 419gr Solid',
       caliber: '.408 CheyTac',
       bulletGr: 419,
@@ -204,6 +211,10 @@ const GameData = {
    *  climate: 지형의 기후 특성 범위 — 기온·습도·풍속·돌풍성은
    *    매 판 이 범위 안에서 랜덤 추출된다.
    *  hostiles/civilians: [최소, 최대] 마리 수 범위.
+   *  rounds: 임무당 라운드 수. 각 라운드마다 표적이 새로 배치된다.
+   *  shotsPerRound(선택): 라운드당 탄환 수 제작 설정값.
+   *    플레이어는 수정할 수 없고, 미션 → 총기 → 기본 3발 순으로 적용된다.
+   *    (추후 총기 분류·난이도에 따라 여기서 조정)
    * ============================================================ */
   missions: [
     {
@@ -220,7 +231,7 @@ const GameData = {
         { xF: 0.10, yF: 0.92,  dist: 220 },
         { xF: 0.74, yF: 0.80,  dist: 300 },
       ],
-      hostiles: [1, 2], civilians: [0, 1], timeLimitS: 120,
+      hostiles: [1, 2], civilians: [0, 1], rounds: 5,
       env: { altitudeM: 60, latitudeDeg: 37.5, earthCurvature: false },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.05,
@@ -239,7 +250,7 @@ const GameData = {
         { xF: 0.81, yF: 0.63, dist: 560 },
         { xF: 0.65, yF: 0.75, dist: 400 },
       ],
-      hostiles: [2, 3], civilians: [0, 1], timeLimitS: 150,
+      hostiles: [2, 3], civilians: [0, 1], rounds: 5,
       env: { altitudeM: 150, latitudeDeg: 37.2, earthCurvature: false },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.1,
@@ -258,7 +269,7 @@ const GameData = {
         { xF: 0.88, yF: 0.76, dist: 750 },
         { xF: 0.52, yF: 0.80, dist: 650 },
       ],
-      hostiles: [2, 3], civilians: [1, 1], timeLimitS: 150,
+      hostiles: [2, 3], civilians: [1, 1], rounds: 5,
       env: { altitudeM: 1100, latitudeDeg: -3.0, earthCurvature: false },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.15,
@@ -277,7 +288,7 @@ const GameData = {
         { xF: 0.55, yF: 0.44, dist: 1600 },
         { xF: 0.25, yF: 0.66, dist: 1300 },
       ],
-      hostiles: [1, 2], civilians: [0, 1], timeLimitS: 180,
+      hostiles: [1, 2], civilians: [0, 1], rounds: 4,
       env: { altitudeM: 2000, latitudeDeg: 47.8, earthCurvature: false },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.2,
@@ -296,7 +307,7 @@ const GameData = {
         { xF: 0.10,  yF: 0.56,  dist: 950 },
         { xF: 0.80,  yF: 0.83,  dist: 850 },
       ],
-      hostiles: [2, 4], civilians: [1, 2], timeLimitS: 180,
+      hostiles: [2, 4], civilians: [1, 2], rounds: 4,
       env: { altitudeM: 800, latitudeDeg: 31.0, earthCurvature: false },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.25,
@@ -315,7 +326,7 @@ const GameData = {
         { xF: 0.525, yF: 0.512, dist: 1200 },
         { xF: 0.89,  yF: 0.542, dist: 1000 },
       ],
-      hostiles: [1, 2], civilians: [0, 1], timeLimitS: 210,
+      hostiles: [1, 2], civilians: [0, 1], rounds: 4,
       env: { altitudeM: 500, latitudeDeg: 30.0, earthCurvature: false },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.3,
@@ -334,7 +345,7 @@ const GameData = {
         { xF: 0.55, yF: 0.40, dist: 1600 },
         { xF: 0.50, yF: 0.62, dist: 550 },
       ],
-      hostiles: [1, 1], civilians: [0, 0], timeLimitS: 240,
+      hostiles: [1, 1], civilians: [0, 0], rounds: 3,
       env: { altitudeM: 900, latitudeDeg: 49.0, earthCurvature: true },
       target: { widthM: 0.55, heightM: 1.8, type: 'human' },
       spotterErr: 0.35,
