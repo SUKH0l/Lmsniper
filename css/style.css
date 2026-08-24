@@ -362,12 +362,28 @@ html, body {
   position: absolute; right: 22px; bottom: 26px;
   width: 104px; height: 104px;
 }
+/* 가로 모바일: 숨참기 버튼 위 심박 + 산소 바 스택 */
+#touch-bar .tb-vitals {
+  position: absolute; left: 22px; bottom: 138px; width: 104px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  pointer-events: none;
+}
+.tb-hr {
+  font-size: 13px; font-weight: 700; color: #eaf6ec;
+  font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px #000;
+}
+.tb-o2 {
+  width: 100%; height: 8px; border-radius: 4px;
+  background: rgba(22, 33, 26, 0.85); border: 1px solid #2e4034; overflow: hidden;
+}
+.tb-o2 i { display: block; height: 100%; width: 100%; background: #4fb7d1; border-radius: 4px; }
 @media (max-width: 760px) {
   #touch-bar .tc-btn.hold, #touch-bar .tc-btn.fire {
     width: 118px; height: 118px; bottom: 46px;
   }
   #touch-bar .tc-btn.hold { left: 18px; font-size: 16px; }
   #touch-bar .tc-btn.fire { right: 18px; font-size: 20px; }
+  #touch-bar .tb-vitals { left: 18px; bottom: 172px; width: 118px; }
 }
 
 /* 모바일 정사각 모드: 잘려 보이는 사이드 패널 숨김 (스코프+노브+줌바만) */

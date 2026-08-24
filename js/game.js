@@ -57,6 +57,7 @@
     navTab: 'simulator',
     bigMsg: null,       // {text, color, until} — HIT/MISS 대형 표시
     fireHold: false,    // 발사 버튼 홀드(숨참기) 중
+    breathToggle: false, // 모바일 숨참기 방식: true = 토글형(탭 켬/끔), false = 홀드형(꾹+드래그)
     _uiClick: false,
   };
 
@@ -450,6 +451,7 @@
     S.shots = []; S.puffs = [];
     S.score = 0; S.firedTotal = 0;
     S.o2 = 100; S.heartRate = 70; S.recovering = 0;
+    setBreath(false);   // 토글형으로 켜져 있던 숨참기 해제
     S.activeShot = null; S.canFireAt = 0;
     S.spotterNoise = { wind: gauss() * 0.5, dir: gauss() * 0.5, elev: gauss() * 0.3 };
     S.windHist = [];
@@ -823,8 +825,8 @@
         S.recovering = 4; S.heartRate = 105;
         if (S.fireHold) { // 숨을 더 못 참으면 숨참기 자동 해제
           S.fireHold = false;
-          const b = $('btn-breath'); if (b) b.classList.remove('on');
-          const p = $('p-breath'); if (p) p.classList.remove('on');
+          if (S.breathToggle) S.holdingBreath = false; // 토글형은 완전히 꺼짐
+          breathBtnsOn(false);
           setMsg('숨이 찼다 — 호흡 회복 중', 2);
         }
       }
@@ -1001,6 +1003,11 @@
         ` · 적 ${hostRemain}` + (civCount ? ` · 민간인 ${civCount}` : '') +
         ` · ${S.score}점` +
         (m.situation && m.situation !== 'none' ? ` · ${SITUATION_TEXT[m.situation].split(' — ')[0]}` : '');
+    }
+    // 가로 모바일: 숨참기 버튼 위 심박/산소 스택
+    if (!$('touch-bar').classList.contains('hidden')) {
+      $('tb-hr').textContent = `♥ ${Math.round(S.heartRate)}`;
+      $('tb-o2fill').style.width = `${S.o2}%`;
     }
     // 컨트롤 패널 수치
     if (!$('ctl-panel').classList.contains('hidden')) {
@@ -2785,7 +2792,8 @@
     const dx = e.clientX - dragState.lastX, dy = e.clientY - dragState.lastY;
     dragState.lastX = e.clientX; dragState.lastY = e.clientY;
     if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > DRAG_THRESHOLD) dragState.moved = true;
-    const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
+    let sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
+    if (isCoarse() && breathActive()) sens *= 0.35; // 모바일: 숨참기 중 이동 감도 감소
     const L = aimLimits(S.mag);
     S.aim.yaw = clamp(S.aim.yaw + dx * sens, L.yawMin, L.yawMax);
     S.aim.pitch = clamp(S.aim.pitch - dy * sens, L.pitMin, L.pitMax);
@@ -2858,6 +2866,7 @@
     document.body.classList.toggle('has-nav', navShow);
     $('tgl-look-row').classList.toggle('hidden', !!coarse);
     const slr = $('set-look-row'); if (slr) slr.classList.toggle('hidden', !!coarse);
+    const sbr = $('set-breathtgl-row'); if (sbr) sbr.classList.toggle('hidden', !coarse); // 모바일 전용 옵션
     applyDopePanel();
   }
 
@@ -2950,6 +2959,7 @@
       localStorage.setItem(LS_KEY, JSON.stringify({
         retStyle: S.retStyle, reticle: S.reticle, assistHL: S.assistHL,
         controlMode: S.controlMode, muted: S.muted, dopeOpen: S.dopeOpen,
+        breathToggle: S.breathToggle,
       }));
     } catch (e) { /* 저장 불가 — 이번 세션에만 적용된다 */ }
   }
@@ -2964,6 +2974,7 @@
     if (o.controlMode === 'drag' || o.controlMode === 'look') S.controlMode = o.controlMode;
     if (typeof o.muted === 'boolean') S.muted = o.muted;
     if (typeof o.dopeOpen === 'boolean') S.dopeOpen = o.dopeOpen;
+    if (typeof o.breathToggle === 'boolean') S.breathToggle = o.breathToggle;
   }
 
   /* ── 레티클 색상 세그먼트 (설정 + 상단 HUD 공용) ── */
@@ -2999,6 +3010,7 @@
     $('tgl-hl').checked = S.assistHL;
     const sl = $('set-look'); if (sl) sl.checked = S.controlMode === 'look';
     $('set-sound').checked = !S.muted;
+    applyBreathMode();
     document.querySelectorAll('.seg-btn').forEach(b =>
       b.classList.toggle('on', b.dataset.v === S.retStyle));
     const cyc = $('hud-retcycle');
@@ -3016,8 +3028,35 @@
     if (windAmb && AC) windAmb.gain.gain.setTargetAtTime(0, AC.currentTime, 0.1);
     saveSettings();
   });
+  $('set-breathtgl').addEventListener('change', e => {
+    S.breathToggle = e.target.checked;
+    setBreath(false);   // 방식 전환 시 켜져 있던 숨참기는 해제
+    applyBreathMode();
+    saveSettings();
+  });
 
-  /* ── 가로 모바일: 숨참기/발사 플로팅 버튼 (기존 유지) ── */
+  /* ── 숨참기 공용 헬퍼 ──
+   * 모바일 숨참기 방식 (설정 '숨참기 토글형'):
+   *  토글형 — 탭 한 번으로 켬/끔 (조준은 스코프 드래그)
+   *  홀드형 — 꾹 누르는 동안 유지, 누른 채 드래그로 조준
+   * 둘 다 산소가 다 떨어지면 자동 해제되고, 켜진 동안 이동 감도가 낮아진다. */
+  const breathActive = () => S.holdingBreath && S.o2 > 0 && S.recovering <= 0;
+  function breathBtnsOn(on) {
+    const b = $('btn-breath'); if (b) b.classList.toggle('on', on);
+    const p = $('p-breath'); if (p) p.classList.toggle('on', on);
+  }
+  function setBreath(on) {
+    S.holdingBreath = on;
+    S.fireHold = on;
+    breathBtnsOn(on);
+  }
+  function applyBreathMode() {
+    const sub = $('btn-breath-sub');
+    if (sub) sub.textContent = S.breathToggle ? '탭: 켬/끔' : '꾹+드래그';
+    const chk = $('set-breathtgl'); if (chk) chk.checked = S.breathToggle;
+  }
+
+  /* ── 가로 모바일: 숨참기/발사 플로팅 버튼 ── */
   {
     const bBtn = $('btn-breath');
     let holdPt = null;
@@ -3026,10 +3065,9 @@
       if (S.phase !== 'play') return;
       audio() && AC.state === 'suspended' && AC.resume();
       startWindAmbience();
+      if (S.breathToggle) { setBreath(!S.holdingBreath); return; } // 토글형: 탭으로 켬/끔
       bBtn.setPointerCapture && bBtn.setPointerCapture(e.pointerId);
-      S.fireHold = true;
-      S.holdingBreath = true;
-      bBtn.classList.add('on');
+      setBreath(true);
       holdPt = { id: e.pointerId, x: e.clientX, y: e.clientY };
     });
     bBtn.addEventListener('pointermove', e => {
@@ -3043,9 +3081,7 @@
     const releaseBreath = e => {
       if (!holdPt || (e && e.pointerId !== holdPt.id)) return;
       holdPt = null;
-      S.fireHold = false;
-      S.holdingBreath = false;
-      bBtn.classList.remove('on');
+      setBreath(false);
     };
     bBtn.addEventListener('pointerup', releaseBreath);
     bBtn.addEventListener('pointercancel', releaseBreath);
@@ -3077,19 +3113,20 @@
         S.lastHudUpdate = 0; // 탄도 표 등 즉시 갱신
       }));
 
-    // 숨참기 (패널)
+    // 숨참기 (패널) — 토글형/홀드형 (설정 '숨참기 토글형')
     const pb = $('p-breath');
+    let pbHold = false;
     pb.addEventListener('pointerdown', e => {
       e.preventDefault();
       if (S.phase !== 'play') return;
       audio() && AC.state === 'suspended' && AC.resume();
       startWindAmbience();
+      if (S.breathToggle) { setBreath(!S.holdingBreath); return; } // 토글형: 탭으로 켬/끔
       pb.setPointerCapture && pb.setPointerCapture(e.pointerId);
-      S.fireHold = true;
-      S.holdingBreath = true;
-      pb.classList.add('on');
+      pbHold = true;
+      setBreath(true);
     });
-    const pbEnd = () => { S.fireHold = false; S.holdingBreath = false; pb.classList.remove('on'); };
+    const pbEnd = () => { if (!pbHold) return; pbHold = false; setBreath(false); };
     pb.addEventListener('pointerup', pbEnd);
     pb.addEventListener('pointercancel', pbEnd);
     pb.addEventListener('contextmenu', e => e.preventDefault());
