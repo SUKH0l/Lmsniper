@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LMSNIPER — 원거리 저격 탄도 시뮬레이터</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ===== 메뉴 오버레이 ===== -->
+<div id="menu" class="overlay">
+  <div class="menu-inner">
+    <h1 class="logo">LM<span>SNIPER</span></h1>
+    <p class="tagline">외부탄도학 기반 원거리 저격 시뮬레이터</p>
+
+    <!-- 단계 1: 총기 선택 (이미지+이름 그리드) -->
+    <section id="step-rifle" class="menu-step">
+      <h2>1. 총기 선택</h2>
+      <div id="rifle-list" class="icon-grid"></div>
+    </section>
+
+    <!-- 단계 1-b: 총기 상세 -->
+    <section id="step-rifleDetail" class="menu-step hidden">
+      <div id="rifle-detail" class="detail-pane"></div>
+    </section>
+
+    <!-- 단계 2: 탄종 선택 (이미지+이름 그리드) -->
+    <section id="step-ammo" class="menu-step hidden">
+      <h2>2. 탄종 선택</h2>
+      <div id="ammo-list" class="icon-grid"></div>
+      <button class="btn-back" data-back="rifle">← 총기 다시 선택</button>
+    </section>
+
+    <!-- 단계 2-b: 탄종 상세 -->
+    <section id="step-ammoDetail" class="menu-step hidden">
+      <div id="ammo-detail" class="detail-pane"></div>
+    </section>
+
+    <!-- 단계 3: 임무 선택 -->
+    <section id="step-mission" class="menu-step hidden">
+      <h2>3. 임무 선택</h2>
+      <div id="mission-list" class="card-list"></div>
+      <button class="btn-back" data-back="ammo">← 탄종 다시 선택</button>
+    </section>
+
+    <p class="menu-refs">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
+      Cranz &amp; Becker <i>Handbook of Ballistics Vol.1</i> ·
+      김건인 외 "탄도방정식을 이용한 화력 성능 분석에 관한 연구" (KSME 2017)</p>
+  </div>
+</div>
+
+<!-- ===== 게임 화면 ===== -->
+<div id="game" class="hidden">
+<div id="stage">
+  <canvas id="scope-canvas"></canvas>
+
+  <!-- 좌상단: 임무 + 기상 제원 -->
+  <div id="hud-mission" class="hud panel"></div>
+
+  <!-- 좌중단: 풍향풍속계 -->
+  <div id="hud-wind" class="hud panel">
+    <h4>풍향풍속계</h4>
+    <canvas id="wind-canvas" width="168" height="168"></canvas>
+    <div id="wind-digital"></div>
+    <canvas id="wind-history" width="168" height="34"></canvas>
+  </div>
+
+  <!-- 상단 토글: 거리 하이라이트 / 조준 방식 -->
+  <div id="hud-toggles" class="hud panel">
+    <label class="tgl"><input type="checkbox" id="tgl-hl" checked><span>거리 하이라이트</span></label>
+    <label class="tgl" id="tgl-look-row"><input type="checkbox" id="tgl-look"><span>마우스룩 조준</span></label>
+  </div>
+
+  <!-- 우상단: DOPE 표 (거리/풍속별 클릭 조정) -->
+  <div id="hud-dope" class="hud panel">
+    <h4>DOPE — 클릭 조정표 [mil]</h4>
+    <div id="dope-table"></div>
+  </div>
+
+  <!-- 좌하단: 총기/탄약/탄창 -->
+  <div id="hud-weapon" class="hud panel"></div>
+
+  <!-- 우하단: 터렛 / 신체 상태 -->
+  <div id="hud-body" class="hud panel"></div>
+
+  <!-- 샷 로그 -->
+  <div id="hud-log" class="hud"></div>
+
+  <!-- 도움말 (게임 시작 시 updateHelpText()가 조준 방식에 맞춰 덮어씀) -->
+  <div id="hud-help" class="hud">
+    드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 조정 · 링(9~6시) 드래그/휠: 배율 ·
+    Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석
+  </div>
+</div><!-- /#stage -->
+
+  <!-- 모바일 터치 컨트롤: 좌 = 숨참기(꾹+드래그로 조준), 우 = 발사 -->
+  <div id="touch-bar" class="hidden">
+    <button id="btn-breath" class="tc-btn hold">숨참기<br><span>꾹+드래그</span></button>
+    <button id="btn-fire" class="tc-btn fire">발사</button>
+  </div>
+
+  <!-- 모바일 상단 정보바 -->
+  <div id="mobile-top" class="hidden">
+    <span id="mt-info"></span>
+    <button class="mt-btn" id="mt-menu">나가기</button>
+  </div>
+
+  <!-- 세로형 컨트롤 패널 (레퍼런스 스타일: 조작/탄도/측거표 탭) -->
+  <div id="ctl-panel" class="hidden">
+    <div class="cp-tabs">
+      <button class="cp-tab on" data-cp="act">조 작</button>
+      <button class="cp-tab" data-cp="bal">탄 도</button>
+      <button class="cp-tab" data-cp="siz">측거표</button>
+    </div>
+    <div class="cp-page" id="cp-act">
+      <div id="cp-status"></div>
+      <div class="cp-row">
+        <div class="cp-col">
+          <div class="cp-label">숨 / 심박</div>
+          <button id="p-breath" class="p-breath">숨참기</button>
+          <div id="p-vitals" class="p-vitals">♥ 70 <small>BPM</small></div>
+          <div class="p-o2"><i id="p-o2fill"></i></div>
+        </div>
+        <div class="cp-col">
+          <div class="cp-label">방아쇠</div>
+          <div id="p-trigger" class="p-trigger">
+            <div class="pt-line"></div>
+            <div id="pt-handle" class="pt-handle"></div>
+          </div>
+        </div>
+        <div class="cp-col">
+          <div class="cp-label">바람 (사수 위치)</div>
+          <canvas id="m-wind" width="104" height="104"></canvas>
+          <div id="p-windtxt" class="p-windtxt"></div>
+        </div>
+      </div>
+    </div>
+    <div class="cp-page hidden" id="cp-bal">
+      <div id="bal-info"></div>
+      <div id="dope-mini"></div>
+    </div>
+    <div class="cp-page hidden" id="cp-siz">
+      <div id="sizes-table"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 임무 결과 오버레이 ===== -->
+<div id="result" class="overlay hidden">
+  <div class="menu-inner result-inner">
+    <h2 id="result-title"></h2>
+    <div id="result-grade"></div>
+    <div id="result-stats"></div>
+    <div class="result-btns">
+      <button id="btn-retry" class="btn-primary">다시 시도</button>
+      <button id="btn-menu" class="btn-back">임무 선택으로</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 명중률 분석 오버레이 ===== -->
+<div id="analysis" class="overlay hidden">
+  <div class="menu-inner analysis-inner">
+    <h2>명중률 분석 — 실험적 방법 vs 해석적 방법</h2>
+    <p class="analysis-note">현재 총기·탄약·기상·사수 오차 조건에서
+      탄착군(몬테카를로) 기반 <b>실험적 방법</b>과 민감도(편미분) 기반
+      <b>해석적 방법</b>으로 명중률을 예측해 비교합니다. (KSME 2017 논문 방식)</p>
+    <div class="analysis-flex">
+      <canvas id="scatter-canvas" width="520" height="420"></canvas>
+      <div id="analysis-table"></div>
+    </div>
+    <button id="analysis-close" class="btn-primary">닫기</button>
+  </div>
+</div>
+
+<!-- ===== 클래스룸 (레슨) ===== -->
+<div id="classroom" class="overlay hidden">
+  <div class="menu-inner">
+    <h2 class="page-title">클래스룸</h2>
+    <p class="page-sub">레슨 — 전부 무료</p>
+    <div id="lesson-list" class="lesson-grid"></div>
+  </div>
+</div>
+
+<!-- ===== 레슨 뷰어 ===== -->
+<div id="lesson-view" class="overlay hidden">
+  <div class="menu-inner lesson-inner">
+    <button id="lesson-back" class="btn-back">← 클래스룸</button>
+    <h2 id="lesson-title" class="page-title"></h2>
+    <div id="lesson-body"></div>
+    <button id="lesson-back2" class="btn-back">← 클래스룸</button>
+  </div>
+</div>
+
+<!-- ===== 설정 ===== -->
+<div id="settings" class="overlay hidden">
+  <div class="menu-inner">
+    <h2 class="page-title">설정</h2>
+    <div class="set-group">
+      <label class="set-row"><span>거리 하이라이트<br><small>DOPE 표의 현재 사거리 강조 (끄면 측거 훈련)</small></span>
+        <input type="checkbox" id="set-hl" checked></label>
+      <label class="set-row" id="set-look-row"><span>마우스룩 조준<br><small>데스크톱: 클릭해 포인터 잠금 후 마우스로 조준</small></span>
+        <input type="checkbox" id="set-look"></label>
+      <label class="set-row"><span>사운드<br><small>총성·터렛 클릭·바람 소리</small></span>
+        <input type="checkbox" id="set-sound" checked></label>
+    </div>
+    <p class="menu-refs" style="text-align:left">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
+      Cranz &amp; Becker <i>Handbook of Ballistics Vol.1</i> ·
+      김건인 외 "탄도방정식을 이용한 화력 성능 분석에 관한 연구" (KSME 2017)<br>
+      총기·탄약 설명 출처: 각 제조사 공식 페이지 (카드에 표기) · 모든 콘텐츠 무료 개방</p>
+  </div>
+</div>
+
+<!-- ===== 하단 내비게이션 (모바일) ===== -->
+<nav id="mnav" class="hidden">
+  <button class="mnav-btn on" data-tab="simulator"><span class="mi">◎</span>시뮬레이터</button>
+  <button class="mnav-btn" data-tab="classroom"><span class="mi">≣</span>클래스룸</button>
+  <button class="mnav-btn" data-tab="settings"><span class="mi">⚙</span>설정</button>
+</nav>
+
+<script src="js/ballistics.js"></script>
+<script src="js/data.js"></script>
+<script src="js/lessons.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
