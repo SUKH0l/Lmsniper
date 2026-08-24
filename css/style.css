@@ -102,12 +102,8 @@ html, body {
 #wind-history { display: block; margin: 2px auto 0; }
 #wind-digital { font-size: 15px; font-weight: 700; color: #eaf6ec; letter-spacing: 1px; }
 #wind-digital .dim { font-size: 11px; color: var(--dim); font-weight: 400; }
-#hud-dope { top: 14px; right: 14px; }
-#dope-table table { border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-#dope-table th, #dope-table td { border: 1px solid var(--line); padding: 3px 8px; text-align: right; color: var(--txt); }
-#dope-table th { color: var(--dim); font-weight: 600; background: rgba(143,209,79,0.05); }
-#dope-table tr.cur td { background: rgba(143,209,79,0.14); color: #eaf6ec; font-weight: 700; }
-#dope-table .note { font-size: 10.5px; color: var(--dim); margin-top: 5px; text-align: left; }
+#hud-dope { top: 14px; right: 14px; max-width: 470px; }
+#dope-table { max-height: 420px; overflow: auto; }
 #hud-weapon { bottom: 14px; left: 14px; }
 #hud-body { bottom: 14px; right: 14px; min-width: 230px; }
 #hud-log {
@@ -168,17 +164,43 @@ html, body {
 #stage .hud { position: absolute; }
 #stage #scope-canvas { position: absolute; inset: 0; width: 1440px; height: 900px; }
 
-/* ===== 총기/탄약 아이콘 그리드 ===== */
-.icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
-.icon-card {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+/* ===== 총기/탄약 세로 선택 리스트 ===== */
+.v-list { display: flex; flex-direction: column; gap: 12px; max-width: 560px; margin: 0 auto; }
+.v-item {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   padding: 14px; cursor: pointer; text-align: center;
-  transition: border-color .15s, transform .15s;
+  transition: border-color .15s, transform .15s, background .15s;
 }
-.icon-card:hover { border-color: var(--accent); transform: translateY(-2px); }
-.icon-card canvas { display: block; margin: 0 auto 10px; }
-.icon-card h3 { font-size: 15.5px; color: #eaf6ec; margin-bottom: 2px; }
-.icon-card .sub { font-size: 12px; color: var(--accent); }
+.v-item:hover { border-color: var(--accent); transform: translateY(-2px); background: rgba(24, 36, 26, 0.9); }
+.v-item canvas { display: block; margin: 0 auto 8px; max-width: 100%; height: auto; }
+.v-item h3 { font-size: 16px; color: #eaf6ec; }
+
+/* 탄종 행: 좌측 정사각 이미지 구역 + 우측 왼쪽정렬 설명 */
+.v-item.ammo-row { display: flex; align-items: center; gap: 16px; text-align: left; }
+.ammo-thumb {
+  flex: none; width: 96px; height: 96px;
+  border: 1px solid var(--line); border-radius: 8px; background: #0d130f;
+  display: flex; align-items: center; justify-content: center;
+}
+.ammo-thumb canvas { margin: 0; }
+.ammo-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-right: 4px; }
+.ammo-info h3 { font-size: 15px; line-height: 1.35; }
+.ammo-info .sub { color: var(--accent); font-size: 11.5px; }
+.ammo-info .brief { color: var(--dim); font-size: 12.5px; line-height: 1.6; }
+
+/* 레티클 선택 그리드 (총기 상세) */
+.ret-label { margin: 18px 0 8px; font-size: 13px; color: var(--accent); font-weight: 700; letter-spacing: 1px; }
+.ret-label small { color: var(--dim); font-weight: 400; letter-spacing: 0; }
+.ret-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+.ret-card {
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 4px 6px;
+  cursor: pointer; text-align: center; background: #0d120e;
+  transition: border-color .15s, background .15s;
+}
+.ret-card:hover { border-color: var(--dim); }
+.ret-card.on { border-color: var(--accent); background: rgba(143, 209, 79, 0.1); }
+.ret-card canvas { display: block; margin: 0 auto 5px; width: 100%; max-width: 96px; height: auto; border-radius: 6px; }
+.ret-card .rname { font-size: 10.5px; color: var(--txt); letter-spacing: 0.5px; white-space: nowrap; }
 
 /* ===== 상세 패널 ===== */
 .detail-pane {
@@ -238,8 +260,10 @@ html, body {
   .tagline { font-size: 12px; }
   .detail-pane { padding: 18px 14px; }
   .detail-btns { flex-wrap: wrap; }
-  .icon-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
-  .icon-card canvas { max-width: 100%; height: auto; }
+  .v-list { gap: 10px; }
+  .v-item.ammo-row { gap: 12px; padding: 12px; }
+  .ammo-thumb { width: 84px; height: 84px; }
+  .ret-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
 
   /* 터치 바: 좌측 클러스터는 발사 버튼 영역을 침범하지 않게, 우측은 세로 스택 */
   #touch-bar .tc-left { left: 8px; right: 118px; bottom: 10px; }
@@ -461,28 +485,48 @@ body.has-nav #mnav ~ .overlay { padding-bottom: 64px; }
 }
 #cp-status b { color: #eaf6ec; font-size: 13px; }
 
-/* 탄도 탭: 사격 제원 표 + DOPE 표 */
-#cp-bal { flex-direction: row; }
-#bal-info { flex: 1; overflow-y: auto; }
-#bal-info table { border-collapse: collapse; width: 100%; font-size: 11px; font-variant-numeric: tabular-nums; }
-#bal-info th {
-  border: 1px solid var(--line); padding: 3px 6px; text-align: left;
-  color: var(--accent); background: rgba(143, 209, 79, 0.07);
-  font-size: 10.5px; letter-spacing: 1px;
+/* ===== 탄도표 / 측거표 — LRS 레퍼런스 스타일 (테두리 없는 다크 그리드) ===== */
+#cp-bal, #cp-siz { display: block; padding: 6px 8px 10px; }
+.tbl-scroll { height: 100%; overflow: auto; }
+.tbl-head {
+  text-align: center; font-size: 11px; letter-spacing: 1.4px;
+  color: #dfe8e0; padding: 2px 0 7px; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
-#bal-info td { border: 1px solid var(--line); padding: 2px 6px; color: var(--txt); }
-#bal-info td:first-child { color: var(--dim); white-space: nowrap; }
-#bal-info td:last-child { text-align: right; color: #eaf6ec; }
-#bal-info .bad { color: var(--bad); }
-#dope-mini { flex: 1; overflow-y: auto; }
-#dope-mini table { border-collapse: collapse; font-size: 10.5px; font-variant-numeric: tabular-nums; width: 100%; }
-#dope-mini th, #dope-mini td { border: 1px solid var(--line); padding: 2px 5px; text-align: right; color: var(--txt); }
-#dope-mini th { color: var(--dim); }
-#dope-mini tr.cur td { background: rgba(143,209,79,0.16); color: #eaf6ec; font-weight: 700; }
-#dope-mini .note { display: none; }
+.bal-tbl table {
+  border-collapse: collapse; width: 100%;
+  font-size: 10.5px; font-variant-numeric: tabular-nums;
+}
+.bal-tbl th {
+  position: sticky; top: 0;
+  background: #1a201b; color: #eaf6ec;
+  font-weight: 700; font-size: 9.5px; line-height: 1.3; letter-spacing: 0.4px;
+  padding: 5px 5px; text-align: center; white-space: nowrap;
+  border-bottom: 1px solid #33463a;
+}
+.bal-tbl th small { color: var(--dim); font-weight: 400; font-size: 8.5px; }
+.bal-tbl td {
+  padding: 3.5px 5px; text-align: center; color: var(--txt);
+  border-bottom: 1px solid rgba(46, 64, 52, 0.4); white-space: nowrap;
+}
+.bal-tbl tr:nth-child(even) td { background: rgba(255, 255, 255, 0.018); }
+.bal-tbl td:first-child { font-weight: 700; color: #eaf6ec; }
+.bal-tbl tr.cur td { background: rgba(143, 209, 79, 0.15); color: #eaf6ec; }
+.bal-tbl .note2 { font-size: 10px; color: var(--dim); padding: 6px 2px; text-align: left; }
 
-#cp-siz { overflow-y: auto; display: block; }
-#sizes-table table { border-collapse: collapse; width: 100%; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-#sizes-table th, #sizes-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: right; color: var(--txt); }
-#sizes-table th { color: var(--dim); background: rgba(143,209,79,0.05); }
-#sizes-table .note2 { font-size: 10.5px; color: var(--dim); padding: 6px 2px; }
+/* ===== 탄환 표시 점 (하단 정보탭/패널) =====
+ * live = 남은 탄(밝음) · hit/miss/civ = 발사 결과 */
+.blt { font-size: 12px; letter-spacing: 1.5px; vertical-align: 0.5px; }
+.blt.live { color: #e8f0e8; text-shadow: 0 0 3px rgba(0,0,0,0.4); }
+.blt.hit { color: var(--accent); }
+.blt.miss { color: var(--bad); }
+.blt.civ { color: #b06ad1; }
+
+/* 결과 화면 라운드 점 */
+.rdots { margin-left: 6px; white-space: nowrap; }
+.rdot {
+  display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+  margin: 0 2px; vertical-align: -1px; border: 1.5px solid #55645a;
+}
+.rdot.success { background: #e9f5ea; border-color: #e9f5ea; }
+.rdot.fail { background: #6d766f; border-color: #6d766f; }
