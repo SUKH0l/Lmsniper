@@ -304,18 +304,25 @@ html, body {
 /* 발사 버튼 (새 단일 버튼) */
 .tc-btn.fire span { font-size: 10px; font-weight: 400; color: #ffd0c8; }
 
-/* 발사 버튼 배치 (단일 버튼 구조) */
+/* 모바일 터치 버튼: 좌 = 숨참기(조준 드래그), 우 = 발사 */
+#touch-bar .tc-btn.hold {
+  position: absolute; left: 22px; bottom: 26px;
+  width: 104px; height: 104px; border-radius: 50%;
+  background: rgba(20, 50, 70, 0.78); border-color: #4fb7d1; color: #d8f0f8;
+  font-size: 15px;
+}
+#touch-bar .tc-btn.hold span { font-size: 10px; font-weight: 400; color: #a9d6e6; }
+#touch-bar .tc-btn.hold:active, #touch-bar .tc-btn.hold.on { background: rgba(40, 110, 150, 0.92); }
 #touch-bar .tc-btn.fire {
   position: absolute; right: 22px; bottom: 26px;
-  width: 100px; height: 100px;
+  width: 104px; height: 104px;
 }
 @media (max-width: 760px) {
-  #touch-bar .tc-btn.fire {
-    width: 116px; height: 116px;
-    right: 50%; transform: translateX(50%);
-    bottom: 56px; font-size: 19px;
+  #touch-bar .tc-btn.hold, #touch-bar .tc-btn.fire {
+    width: 118px; height: 118px; bottom: 46px;
   }
-  #touch-bar .tc-btn.fire:active { transform: translateX(50%) scale(0.96); }
+  #touch-bar .tc-btn.hold { left: 18px; font-size: 16px; }
+  #touch-bar .tc-btn.fire { right: 18px; font-size: 20px; }
 }
 
 /* 모바일 정사각 모드: 잘려 보이는 사이드 패널 숨김 (스코프+노브+줌바만) */

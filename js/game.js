@@ -705,11 +705,10 @@
       S.o2 = Math.max(0, S.o2 - dt * 14);
       if (S.o2 === 0) {
         S.recovering = 4; S.heartRate = 105;
-        if (S.fireHold) { // 숨을 더 못 참으면 자동 발사
+        if (S.fireHold) { // 숨을 더 못 참으면 숨참기 자동 해제
           S.fireHold = false;
-          S.holdingBreath = false;
-          const b = $('btn-fire'); if (b) b.classList.remove('on');
-          fire();
+          const b = $('btn-breath'); if (b) b.classList.remove('on');
+          setMsg('숨이 찼다 — 호흡 회복 중', 2);
         }
       }
     } else {
@@ -721,7 +720,7 @@
     const holdEff = (S.holdingBreath && S.o2 > 0 && S.recovering <= 0) ? 0.15 : 1;
     const recovEff = S.recovering > 0 ? 2.2 : 1;
     const amp = 0.5 * S.rifle.swayFactor * holdEff * recovEff;
-    const beat = Math.pow(Math.max(0, Math.sin(S.heartPhase)), 12) * 0.25 * (S.heartRate / 70);
+    const beat = Math.pow(Math.max(0, Math.sin(S.heartPhase)), 12) * 0.1667 * (S.heartRate / 70);
     S.sway.pitch = amp * (Math.sin(S.breathPhase) * 0.8 + noise1(t * 0.9, 5) * 0.4) + beat * recovEff;
     S.sway.yaw = amp * (noise1(t * 0.7, 9) * 0.55) + beat * 0.3;
 
@@ -2155,40 +2154,51 @@
     $('tgl-look-row').classList.toggle('hidden', !!coarse); // 터치 기기에선 마우스룩 숨김
   }
   {
-    // 발사 버튼: 꾹 누르면 숨참기 + 손가락 이동으로 미세 조준, 떼면 발사.
-    // 숨을 더 못 참게 되면(산소 소진) 자동 발사 — update()에서 처리.
-    const btn = $('btn-fire');
+    // 좌측 숨참기 버튼: 꾹 누르면 숨참기 + 그대로 손가락을 움직이면 조준 이동.
+    // 산소가 다 떨어지면 자동으로 숨참기가 풀린다 (발사는 우측 버튼).
+    const bBtn = $('btn-breath');
     let holdPt = null;
-    btn.addEventListener('pointerdown', e => {
+    bBtn.addEventListener('pointerdown', e => {
       e.preventDefault();
       if (S.phase !== 'play') return;
       audio() && AC.state === 'suspended' && AC.resume();
       startWindAmbience();
-      btn.setPointerCapture && btn.setPointerCapture(e.pointerId);
+      bBtn.setPointerCapture && bBtn.setPointerCapture(e.pointerId);
       S.fireHold = true;
       S.holdingBreath = true;
-      btn.classList.add('on');
+      bBtn.classList.add('on');
       holdPt = { id: e.pointerId, x: e.clientX, y: e.clientY };
     });
-    btn.addEventListener('pointermove', e => {
+    bBtn.addEventListener('pointermove', e => {
       if (!holdPt || e.pointerId !== holdPt.id || S.phase !== 'play') return;
-      // 홀드 중 미세 조준 (일반 감도의 35%)
+      // 숨참기 중 조준 이동 (미세 조준: 일반 감도의 35%)
       const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1) * 0.35;
       S.aim.yaw = clamp(S.aim.yaw + (e.clientX - holdPt.x) * sens, -80, 80);
       S.aim.pitch = clamp(S.aim.pitch - (e.clientY - holdPt.y) * sens, -80, 80);
       holdPt.x = e.clientX; holdPt.y = e.clientY;
     });
-    const release = fireNow => e => {
+    const releaseBreath = e => {
       if (!holdPt || (e && e.pointerId !== holdPt.id)) return;
       holdPt = null;
       S.fireHold = false;
       S.holdingBreath = false;
-      btn.classList.remove('on');
-      if (fireNow && S.phase === 'play') fire();
+      bBtn.classList.remove('on');
     };
-    btn.addEventListener('pointerup', release(true));
-    btn.addEventListener('pointercancel', release(false));
-    btn.addEventListener('contextmenu', e => e.preventDefault());
+    bBtn.addEventListener('pointerup', releaseBreath);
+    bBtn.addEventListener('pointercancel', releaseBreath);
+    bBtn.addEventListener('contextmenu', e => e.preventDefault());
+
+    // 우측 발사 버튼
+    const fBtn = $('btn-fire');
+    fBtn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (S.phase !== 'play') return;
+      audio() && AC.state === 'suspended' && AC.resume();
+      startWindAmbience();
+      fire();
+    });
+    fBtn.addEventListener('contextmenu', e => e.preventDefault());
+
     // 상단 바 버튼
     $('mt-menu').addEventListener('click', () => backToMenu());
     $('mt-hl').addEventListener('click', () => {
