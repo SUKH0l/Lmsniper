@@ -27,7 +27,7 @@
     dial: { elev: 0, wind: 0 },     // 클릭 수 (1클릭 = 0.1 mil)
     mag: 12,
     reticle: 'mildot',              // 선택 레티클 (총기 선택 화면에서 변경)
-    retStyle: 'bold',               // 레티클 시인성 스타일 (설정 / V 키)
+    retStyle: 'red',                // 레티클 색 (설정 / V 키)
     pointerLocked: false,
     controlMode: 'drag',   // 'drag' | 'look' — C 키로 토글
     magazine: 0, canFireAt: 0,
@@ -1741,33 +1741,26 @@
   const reticleName = () => reticleDef().name;
   const reticleUnit = () => reticleDef().unit;
 
-  /* ── 레티클 시인성 스타일 ──
-   * 검정 단색 레티클은 헛간 그늘·숲처럼 어두운 배경에서 그대로 소멸한다.
-   * 마스크를 만들어 테두리(헤일로)·굵기·조명색을 합성해 대비를 확보한다. */
+  /* ── 레티클 색상 ──
+   * 선 굵기는 원본 그대로(실제 레티클처럼 가늘게 — 실측 정밀도 우선) 두고,
+   * 가시성은 색으로 잡는다: 밝은 선(빨강/하양/초록)에 아주 얇은 검은
+   * 테두리를 둘러 어두운 배경·밝은 배경 어디서든 읽히게 한다. */
   const RET_STYLES = [
-    { id: 'bold',        name: '굵게',        lw: 1.8 },                                    // 기본값
-    { id: 'outline',     name: '흰 테두리',   lw: 1,   halo: 'rgba(252,255,252,0.95)' },
-    { id: 'glow',        name: '흰 글로우',   lw: 1,   glow: 'rgba(255,255,255,0.95)' },
-    { id: 'red',         name: '적색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#ff2e1f' },
-    { id: 'redCenter',   name: '중앙 조명',   lw: 1.3, halo: 'rgba(252,255,252,0.95)', center: '#ff2e1f' },
-    { id: 'green',       name: '녹색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#39ff5e' },
+    { id: 'red',   name: '빨간색', core: 'rgba(255,96,76,0.98)',  halo: 'rgba(0,0,0,0.88)' },  // 기본값
+    { id: 'white', name: '흰색',   core: 'rgba(246,249,246,0.97)', halo: 'rgba(0,0,0,0.88)' },
+    { id: 'green', name: '초록색', core: 'rgba(104,255,132,0.98)', halo: 'rgba(0,0,0,0.88)' },
+    { id: 'black', name: '검정 (원본)' },
   ];
-  const HALO_W = 0.42;   // 테두리 폭 배수 (가는 선 두께 대비)
+  const HALO_W = 0.6;    // 검은 테두리 오프셋 배수 — '아주 얇게'
   const RET_INK = 'rgba(8,10,8,0.95)';        // 기본 잉크 (현행과 동일)
   const retStyleDef = id =>
     RET_STYLES.find(s => s.id === (id ?? S.retStyle)) || RET_STYLES[0];
 
-  /* 가는 선 두께: 화면에 '렌더된 뒤'의 CSS 픽셀 두께가 기기와 무관하게
-   * 일정하도록 stageScale로 역보정한다. 논리 캔버스(1440×900)가 모바일
-   * 세로에선 ≈0.43배로 축소되고 데스크톱 1080p에선 1.2배로 확대되기 때문에,
-   * 보정 없이는 같은 1px이 0.43 CSS px과 1.2 CSS px으로 3배 가까이 벌어진다. */
-  const TARGET_CSS_PX = 1.0;   // 실제 LRS 앱 실측 비율(스코프 지름의 ~1/200)에 맞춘 값
-  const RET_CAP_MIL = 0.14;   // 저배율에서 선이 눈금 간격을 잡아먹지 않도록 하는 상한
-  function fineWidth(ppm, lw = 1, w = {}) {
-    const sc = clamp(w.scale ?? S.stageScale ?? 1, 0.4, 1.3);
-    const base = Math.max(TARGET_CSS_PX / sc, ppm * 0.02) * lw;
-    // 상한은 각도 기준 — 배율이 낮아 1 mil이 좁을 때만 걸린다.
-    return w.noCap ? base : Math.min(base, Math.max(1, ppm * RET_CAP_MIL * lw));
+  /* 가는 선 두께 — 원본 그대로. 실제 레티클처럼 가늘어야 눈금 가장자리로
+   * 표적 크기를 재는 실측이 정확하다. 가시성은 두께가 아니라 색 대비
+   * (밝은 선 + 얇은 검은 테두리)로 확보한다. */
+  function fineWidth(ppm, lw = 1) {
+    return Math.max(1, ppm * 0.02) * lw;
   }
 
   /* ── 레티클 레이어 캐시 ──
@@ -1792,7 +1785,7 @@
     const wText = { ...w, textOutline: true };   // 숫자 외곽선은 코어 패스에서만
     const paint = (color, ox = 0, oy = 0, txt) =>
       drawReticlePaths(c + ox, c + oy, R, ppm, type, st.lw, color, txt ? wText : w);
-    const h = fineWidth(ppm, st.lw, w) * HALO_W;             // 헤일로 오프셋
+    const h = Math.max(1, fineWidth(ppm, st.lw) * HALO_W);   // 얇은 검은 테두리 오프셋
     const sc = clamp(w.scale ?? S.stageScale ?? 1, 0.4, 1.25);
 
     // 1) 테두리(헤일로) — 8방향 오프셋. shadowBlur보다 선명하다.
@@ -1865,11 +1858,13 @@
     ctx.font = `700 ${fontPx}px sans-serif`;
     /* 숫자는 배경이 무엇이든 읽혀야 하므로 코어 패스에서 밝은 외곽선을 두른다.
      * (테두리 없는 '굵게' 스타일에서도 숫자만은 확실히 보이게) */
+    /* 숫자는 선과 같은 색으로 채우고 얇은 검은 외곽선을 둘러,
+     * 밝은 풀밭·어두운 벽 어디에 걸려도 판독되게 한다. */
     const label = (s, x, y) => {
       if (w?.textOutline) {
         ctx.save();
-        ctx.strokeStyle = 'rgba(250,253,250,0.95)';
-        ctx.lineWidth = Math.max(2.4, fine * 0.95);
+        ctx.strokeStyle = 'rgba(4,6,4,0.9)';
+        ctx.lineWidth = Math.max(2, fontPx * 0.12);
         ctx.lineJoin = 'round'; ctx.miterLimit = 2;
         ctx.strokeText(s, x, y);
         ctx.restore();
@@ -1916,11 +1911,33 @@
         }
       }
     };
+    /* 0.1 단위 미세 눈금 (실측용) — 0.5 위치는 조금 길게.
+     * 간격이 3px 미만이면 뭉개져서 오히려 정밀도를 해치므로 생략한다. */
+    const microTicks = (unitPx, maxU, axes = 'both') => {
+      const step = unitPx * 0.1;
+      if (step < 3) return;
+      ctx.lineWidth = fine;
+      ctx.beginPath();
+      for (let t = 1; t < maxU * 10; t++) {
+        if (t % 10 === 0) continue;                       // 정수 위치는 기존 해시
+        const len = (t % 5 === 0 ? 0.07 : 0.04) * ppm;
+        const off = t * step;
+        if (off >= R * 0.92) break;
+        for (const s of [-1, 1]) {
+          ctx.moveTo(cx + s * off, cy - len); ctx.lineTo(cx + s * off, cy + len);
+          if (axes === 'both') {
+            ctx.moveTo(cx - len, cy + s * off); ctx.lineTo(cx + len, cy + s * off);
+          }
+        }
+      }
+      ctx.stroke();
+    };
 
     switch (type) {
       case 'ballistic': { // 크리스마스트리 홀드오버 격자
         cross();
         hashCross(ppm, 10, 2);
+        microTicks(ppm, 10);
         for (let down = 1; down <= 9; down++) {
           const y = cy + down * ppm;
           if (y > cy + R * 0.92) break;
@@ -1950,7 +1967,7 @@
           ctx.stroke();
         }
         const taper = (dx, dy) => {
-          const w0 = 0.55 * ppm, w1 = Math.max(fine * 1.2, 0.09 * ppm);
+          const w0 = 0.55 * ppm, w1 = Math.max(1.5, 0.09 * ppm);
           const x0 = cx + dx * R, y0 = cy + dy * R;
           const x1 = cx + dx * Math.min(R * 0.9, 3 * ppm), y1 = cy + dy * Math.min(R * 0.9, 3 * ppm);
           const px = -dy, py = dx;
@@ -1962,6 +1979,7 @@
           ctx.closePath(); ctx.fill();
         };
         taper(-1, 0); taper(1, 0); taper(0, 1);
+        microTicks(ppm, 3);
         break;
       }
       case 'moa': { // MOA 해시 (2 MOA 간격, 10 MOA 숫자)
@@ -1985,27 +2003,29 @@
             label(a, cx + 0.6 * ppm, cy - a * pm);
           }
         }
+        microTicks(pm * 10, 6);   // 1 MOA 보조 눈금 (10 MOA 블록의 0.1)
         posts(62 * 0.2908882, 0.12);
         break;
       }
       case 'dmr': { // DMR 사다리: 수평 해시 + 하방 BDC 러그(윈드 도트)
         cross();
         hashCross(ppm, 8, 2);
+        microTicks(ppm, 8);
         ctx.lineWidth = fine;
         for (let d = 1; d <= 8; d++) {
           const y = cy + d * ppm;
           if (y > cy + R * 0.92) break;
           const hw = (0.6 + d * 0.28) * ppm;
           ctx.beginPath(); ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); ctx.stroke();
-          dot(cx - hw, y, Math.max(fine * 0.9, 0.05 * ppm));
-          dot(cx + hw, y, Math.max(fine * 0.9, 0.05 * ppm));
+          dot(cx - hw, y, Math.max(1.2, 0.05 * ppm));
+          dot(cx + hw, y, Math.max(1.2, 0.05 * ppm));
           if (fits(ppm)) label(d, cx + hw + 0.45 * ppm, y);
         }
         posts(9, 0.28);
         break;
       }
       case 'pso': { // PSO-1: 슈브론 조준점 + 10-mil 스케일 + 측거 곡선
-        ctx.lineWidth = Math.max(fine * 1.7, ppm * 0.06);
+        ctx.lineWidth = Math.max(1.4, ppm * 0.06);
         const chev = (y, s2) => {
           ctx.beginPath();
           ctx.moveTo(cx - s2, y + s2 * 1.25); ctx.lineTo(cx, y); ctx.lineTo(cx + s2, y + s2 * 1.25);
@@ -2027,6 +2047,7 @@
           }
         }
         if (fits(ppm)) { label('10', cx - 10 * ppm, cy - 0.5 * ppm); label('10', cx + 10 * ppm, cy - 0.5 * ppm); }
+        microTicks(ppm, 10, 'h');   // 수평 스케일만 — 수직은 슈브론 존
         posts(10.6, 0.5, [[-1, 0], [1, 0]]);
         // 스타디아 측거 곡선: 1.7 m 표적, 2~10 (×100 m)
         const bx0 = cx - 8.6 * ppm, bx1 = cx - 1.6 * ppm, by = cy + 6.8 * ppm;
@@ -2053,16 +2074,18 @@
       case 'ffp': { // 미세 mil 해시 (홀드오버 격자 없음)
         cross();
         hashCross(ppm, 10, 2);
+        microTicks(ppm, 10);
         posts(11, 0.1);
         break;
       }
       default: { // mil-dot
         cross();
-        const dr = Math.max(fine * 1.4, ppm * 0.1);
+        const dr = Math.max(1.4, ppm * 0.1);
         for (let m = 1; m <= 4; m++) for (const s of [-1, 1]) {
           dot(cx + s * m * ppm, cy, dr);
           dot(cx, cy + s * m * ppm, dr);
         }
+        microTicks(ppm, 5);
         posts(5, 0.36);
         break;
       }
@@ -2082,10 +2105,9 @@
     c.fillStyle = g;
     c.fillRect(0, 0, cv.width, cv.height);
     const prev = ctx; ctx = c;
-    // scale:1 — 카드 캔버스는 CSS 축소가 없다. noCap — ppm이 6이라 각도 상한을
-    // 걸면 모든 스타일이 같은 두께로 뭉개져 비교가 불가능해진다.
+    // scale:1 — 카드 캔버스는 CSS 축소가 없다.
     drawReticle(cv.width / 2, cv.height / 2, cv.width * 0.52, cv.width / 16, type,
-      style, { cache: false, scale: 1, noCap: true });
+      style, { cache: false, scale: 1 });
     ctx = prev;
   }
 
@@ -2596,8 +2618,8 @@
   }
   function updateHelpText() {
     $('hud-help').innerHTML = S.controlMode === 'drag'
-      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 시인성 · M: 메뉴 · A: 명중률 분석'
-      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 시인성 · M: 메뉴 · A: 명중률 분석';
+      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석'
+      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석';
     const lk = $('tgl-look'); if (lk) lk.checked = S.controlMode === 'look';
   }
 
@@ -2870,7 +2892,7 @@
     if (typeof o.muted === 'boolean') S.muted = o.muted;
   }
 
-  /* ── 레티클 시인성 세그먼트 (설정 + 상단 HUD 공용) ── */
+  /* ── 레티클 색상 세그먼트 (설정 + 상단 HUD 공용) ── */
   function buildVisSeg(host) {
     if (!host) return;
     host.innerHTML = RET_STYLES.map(v =>
@@ -2890,7 +2912,7 @@
       const cv = c.querySelector('canvas');
       if (cv) drawReticlePreview(cv, c.dataset.ret);
     });
-    if (announce) setMsg(`레티클 시인성: ${retStyleDef(id).name}`, 2);
+    if (announce) setMsg(`레티클 색상: ${retStyleDef(id).name}`, 2);
     saveSettings();
   }
   document.addEventListener('click', e => {
