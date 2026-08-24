@@ -315,6 +315,40 @@
     _default: { mradW: 95,  cFrac: 0.46, magMin: 5, w: 1600, h: 1000 },
   };
   const BG = {};
+
+  /* ── 배경 기준 각도 한계 ──
+   * 배경 사진이 커버하는 각도 범위(mradW × mradH)를 기준으로,
+   * 스코프 원(반지름 R)이 배경 가장자리에 닿는 지점까지만 카메라를
+   * 허용한다. 배율이 낮을수록 시야가 넓어 한계가 좁아진다.
+   * 표적은 어느 배율에서든 조준 가능해야 하므로 표적 범위만큼 확장. */
+  function bgMradH(meta) { return meta.mradW * meta.h / meta.w; }
+  function aimLimits(mag) {
+    const meta = S.bgMeta || BG_META._default;
+    const R = Math.min(BASE_W, BASE_H) * 0.44;
+    const ppm = BASE_H / (16 / mag * 17.4533);
+    const half = R / ppm; // 스코프 원 반경 [mrad]
+    const mradW = meta.mradW, mradH = bgMradH(meta);
+    const xF = meta.xFrac ?? 0.5, cF = meta.cFrac;
+    const L = {
+      yawMin: -(xF * mradW - half),
+      yawMax: (1 - xF) * mradW - half,
+      pitMin: -((1 - cF) * mradH - half),
+      pitMax: cF * mradH - half,
+    };
+    // 표적 전부 + 초기 조준점(0,0)은 항상 도달 가능하게 확장
+    const B = S.tgtBox;
+    L.yawMin = clamp(Math.min(L.yawMin, B ? B.yawMin - 4 : 0, 0), -80, 0);
+    L.yawMax = clamp(Math.max(L.yawMax, B ? B.yawMax + 4 : 0, 0), 0, 80);
+    L.pitMin = clamp(Math.min(L.pitMin, B ? B.pitMin - 4 : 0, 0), -80, 0);
+    L.pitMax = clamp(Math.max(L.pitMax, B ? B.pitMax + 4 : 0, 0), 0, 80);
+    return L;
+  }
+  function clampAim() {
+    const L = aimLimits(S.mag);
+    S.aim.yaw = clamp(S.aim.yaw, L.yawMin, L.yawMax);
+    S.aim.pitch = clamp(S.aim.pitch, L.pitMin, L.pitMax);
+  }
+
   function tryLoadBg(terrain) {
     if (BG[terrain] !== undefined) return;
     BG[terrain] = null;
@@ -386,11 +420,21 @@
     let cCount = randInt(map.civilians);
     if (situation === 'hostage' && cCount === 0) cCount = 1;
     const pool = [...map.anchors].sort(() => Math.random() - 0.5);
+    /* 표적 스폰 한계: 배경 사진 범위 안쪽(가장자리 여유 포함)으로 제한 —
+     * 배경 밖/가장자리에 표적이 생성되지 않게 한다. */
+    const mradH = bgMradH(meta);
+    const xF0 = meta.xFrac ?? 0.5;
+    const spawnLim = {
+      yawMin: -(xF0 * meta.mradW) + 6, yawMax: (1 - xF0) * meta.mradW - 6,
+      pitMin: -((1 - meta.cFrac) * mradH) + 4, pitMax: meta.cFrac * mradH - 4,
+    };
     const mkTarget = (type, anchor, latOffM = 0) => {
       const dist = anchor.dist;
-      const yawC = ((anchor.xF - (meta.xFrac ?? 0.5)) * meta.w) / pxm + (latOffM / dist) * 1000;
-      const pitFeet = ((meta.h * meta.cFrac) - anchor.yF * meta.h) / pxm;
-      const centerPit = pitFeet + (900 / dist); // 인체 중심(0.9 m) 각높이
+      let yawC = ((anchor.xF - xF0) * meta.w) / pxm + (latOffM / dist) * 1000;
+      let centerPit = ((meta.h * meta.cFrac) - anchor.yF * meta.h) / pxm + (900 / dist); // 인체 중심(0.9 m) 각높이
+      yawC = clamp(yawC, spawnLim.yawMin, spawnLim.yawMax);
+      centerPit = clamp(centerPit, spawnLim.pitMin, spawnLim.pitMax);
+      const pitFeet = centerPit - (900 / dist);
       return {
         type, dist, dh: dist, yawC, pitFeet, centerPit,
         z: (yawC / 1000) * dist,
@@ -425,6 +469,15 @@
     // 이번 판 스테이지 사본 (정적 맵 정의는 S.map에 보존)
     S.mission = { ...map, env, distanceM: nominal, situation };
 
+    /* 카메라(조준) 한계용: 배경 메타 + 표적 각도 범위 */
+    S.bgMeta = meta;
+    S.tgtBox = {
+      yawMin: Math.min(...S.targets.map(t => t.yawC)),
+      yawMax: Math.max(...S.targets.map(t => t.yawC)),
+      pitMin: Math.min(...S.targets.map(t => t.pitFeet)),
+      pitMax: Math.max(...S.targets.map(t => t.centerPit + 1)),
+    };
+
     S.zeroAngle = Ballistics.zeroAngle(ammoParams(), env, 100);
     S.aim = { yaw: 0, pitch: 0 };
     S.dial = { elev: 0, wind: 0 };
@@ -438,6 +491,7 @@
     S.activeShot = null; S.reloading = false; S.canFireAt = 0;
     S.spotterNoise = { wind: gauss() * 0.5, dir: gauss() * 0.5, elev: gauss() * 0.3 };
     S.calcSolution = null;
+    S._balSol = null;
     S.windHist = [];
     S.windMeas = env.windSpeed; S.windDirMeas = env.windFromDeg;
     S.sceneSeed = [...map.id].reduce((a, c) => a + c.charCodeAt(0), 7) + Math.floor(Math.random() * 100);
@@ -519,11 +573,16 @@
     const r = Ballistics.solveAtRange(ammoParams(mv), env,
       { elevRad, azRad }, maxDh, { dt: 0.003, recordPath: true });
 
-    S.recoil.pitch += S.rifle.recoilMrad * (0.7 + Math.random() * 0.5);
-    S.recoil.yaw += S.rifle.recoilMrad * 0.25 * (Math.random() - 0.4);
-    S.shakeT = t + 0.18;
+    // 반동은 탄 비행이 끝난 뒤에 적용 — 비행 중 스코프는 고정되어 궤적을 볼 수 있다
+    const kick = {
+      pitch: S.rifle.recoilMrad * (0.7 + Math.random() * 0.5),
+      yaw: S.rifle.recoilMrad * 0.25 * (Math.random() - 0.4),
+    };
 
     if (!r || !r.path || r.path.length < 2) {
+      S.recoil.pitch += kick.pitch;
+      S.recoil.yaw += kick.yaw;
+      S.shakeT = t + 0.18;
       setMsg('탄이 표적까지 도달하지 못했다 (탄속 소진)', 3);
       return;
     }
@@ -577,7 +636,12 @@
     const endP = atX(Math.min(g.Dh, reach));
     const tof = hitIdx >= 0 ? hitAt.t : endP.t;
     S.activeShot = {
-      t0: t, path, tof,
+      t0: t, path, tof, kick,
+      // 비행 중 스코프 고정용: 격발 순간의 카메라
+      cam: {
+        yaw: S.aim.yaw + S.sway.yaw + S.recoil.yaw,
+        pitch: S.aim.pitch + S.sway.pitch + S.recoil.pitch,
+      },
       result: { hitIdx, hitZone, hitAt, missInfo, tof, vImp: hitIdx >= 0 ? hitAt.v : endP.v },
     };
   }
@@ -585,6 +649,10 @@
   function resolveShot() {
     const a = S.activeShot; if (!a) return;
     S.activeShot = null;
+    // 착탄 확인 후 반동/노리쇠 사이클 반영
+    S.recoil.pitch += a.kick.pitch;
+    S.recoil.yaw += a.kick.yaw;
+    S.shakeT = now() + 0.14;
     const res = a.result;
     const g = geom();
     if (res.hitIdx >= 0) {
@@ -743,6 +811,9 @@
     S.recoil.pitch *= rd;
     S.recoil.yaw *= rd;
 
+    // 조준을 배경 한계 안으로 — 가장자리에서 더 드래그해도 배경(표적/깃발)이 밀리지 않는다
+    clampAim();
+
     if (S.activeShot && t - S.activeShot.t0 >= S.activeShot.tof) resolveShot();
 
     if (t - S.lastHudUpdate > 0.15) { S.lastHudUpdate = t; updateHud(); }
@@ -893,9 +964,11 @@
     if (!$('ctl-panel').classList.contains('hidden')) {
       $('p-vitals').innerHTML = `♥ ${Math.round(S.heartRate)} <small>BPM</small>`;
       $('p-o2fill').style.width = `${S.o2}%`;
-      $('bal-elev').textContent = (S.dial.elev * 0.1).toFixed(1);
-      $('bal-wind').textContent = (S.dial.wind * 0.1).toFixed(1);
-      $('bal-zoom').textContent = S.mag;
+      // 조작 탭: 현재 고각/윈디지/배율 조회 (읽기 전용)
+      $('cp-status').innerHTML =
+        `고각 <b>${fmt(S.dial.elev * 0.1, 1)}</b> mil · ` +
+        `윈디지 <b>${fmt(S.dial.wind * 0.1, 1)}</b> mil · ` +
+        `배율 <b>${S.mag}×</b>`;
       if (S.windHist.length) {
         const vs = S.windHist.map(p => p.v);
         const avg = vs.reduce((a, b) => a + b, 0) / vs.length;
@@ -903,9 +976,43 @@
           `CUR <b>${S.windMeas.toFixed(1)}</b> ㎧ · ${Math.round(((S.windDirMeas % 360) + 360) % 360)}°<br>` +
           `AVG ${avg.toFixed(1)} · MAX ${Math.max(...vs).toFixed(1)}`;
       }
+      renderBalInfo();
     }
 
     $('hud-log').textContent = now() < S.msgUntil ? S.msg : '';
+  }
+
+  /* 탄도 탭: 조작 버튼 없이 사격 제원을 표로 정리 (정보 집약) */
+  function renderBalInfo() {
+    const el = $('bal-info');
+    if (!el || $('cp-bal').classList.contains('hidden')) return;
+    const t = now();
+    if (!S._balSol || t - S._balSol.t > 0.9) {
+      S._balSol = { t, sol: computeSolution() };
+    }
+    const sol = S._balSol.sol;
+    const env = S.mission.env;
+    const at = aimedTarget();
+    const row = (k, v) => `<tr><td>${k}</td><td>${v}</td></tr>`;
+    el.innerHTML =
+      `<table>` +
+      `<tr><th colspan="2">사격 제원 (스포터)</th></tr>` +
+      row('표적 거리', at ? `◆ ${at.dist.toLocaleString()} m` : `${S.mission.distanceM.toLocaleString()} m (대표)`) +
+      (sol
+        ? row('권장 고각', `${fmt(sol.elevMil, 1)} mil`) +
+          row('권장 윈디지', `${fmt(sol.windMil, 1)} mil`) +
+          row('비행시간', `${fmt(sol.tof, 2)} s`) +
+          row('착탄속도', `${fmt(sol.vImpact, 0)} m/s`)
+        : row('계산', '<span class="bad">사거리 초과</span>')) +
+      `<tr><th colspan="2">현재 설정</th></tr>` +
+      row('고각 다이얼', `${fmt(S.dial.elev * 0.1, 1)} mil`) +
+      row('윈디지 다이얼', `${fmt(S.dial.wind * 0.1, 1)} mil`) +
+      row('배율', `${S.mag}×`) +
+      `<tr><th colspan="2">기상 / 환경</th></tr>` +
+      row('바람(사수)', `${S.windMeas.toFixed(1)} ㎧ · ${Math.round(((S.windDirMeas % 360) + 360) % 360)}°`) +
+      row('기온 / 습도', `${fmt(env.tempC, 0)}℃ / ${fmt(env.rhPct, 0)}%`) +
+      row('기압 / 고도', `${fmt(Ballistics.pressureAtAltitude(env.altitudeM), 0)} hPa / ${env.altitudeM.toLocaleString()} m`) +
+      `</table>`;
   }
 
   /* ---------------- 렌더링 ---------------- */
@@ -998,19 +1105,40 @@
     const groundYat = r => lerp(-1.6, g.ty - 0.9, clamp(r / g.Dh, 0, 1.15));
     const groundPitchAt = r => relPitch(Math.atan2(groundYat(r), r));
 
-    /* ===== 배경: 사진 or 절차적 ===== */
+    /* ===== 배경: 사진 or 절차적 =====
+     * 사진은 카메라 각도에 1:1 고정 — 가장자리에서 절대 clamp로 밀리지
+     * 않는다 (표적/깃발 위치 고정의 핵심). 사진 밖 노출부는 가장자리
+     * 1px을 늘린 스미어로 채워 자연스럽게 이어 붙인다. */
     const bg = BG[m.terrain];
     if (bg && bg.img) {
       const img = bg.img;
       const meta = BG_META[m.terrain] || BG_META._default;
       const pxm = img.width / meta.mradW;
+      const scl = ppmW / pxm; // 사진 px → 화면 px
       const sw = (Wv / ppmW) * pxm;
       const sh = (Hv / ppmW) * pxm;
-      let sx0 = img.width * (meta.xFrac ?? 0.5) + camYaw * pxm - sw / 2;
-      let sy0 = img.height * meta.cFrac - camPitch * pxm - sh / 2;
-      sx0 = clamp(sx0, 0, Math.max(0, img.width - sw));
-      sy0 = clamp(sy0, 0, Math.max(0, img.height - sh));
-      ctx.drawImage(img, sx0, sy0, Math.min(sw, img.width), Math.min(sh, img.height), 0, 0, Wv, Hv);
+      const sx0 = img.width * (meta.xFrac ?? 0.5) + camYaw * pxm - sw / 2;
+      const sy0 = img.height * meta.cFrac - camPitch * pxm - sh / 2;
+      // 사진과 뷰의 교집합 (사진 좌표)
+      const ix0 = Math.max(0, sx0), iy0 = Math.max(0, sy0);
+      const ix1 = Math.min(img.width, sx0 + sw), iy1 = Math.min(img.height, sy0 + sh);
+      if (ix1 > ix0 && iy1 > iy0) {
+        const dx0 = (ix0 - sx0) * scl, dy0 = (iy0 - sy0) * scl;
+        const dx1 = (ix1 - sx0) * scl, dy1 = (iy1 - sy0) * scl;
+        // 가장자리 스미어 (좌/우/상/하 + 모서리)
+        if (dx0 > 0.5) ctx.drawImage(img, ix0, iy0, 1, iy1 - iy0, 0, dy0, dx0 + 1, dy1 - dy0);
+        if (dx1 < Wv - 0.5) ctx.drawImage(img, ix1 - 1, iy0, 1, iy1 - iy0, dx1 - 1, dy0, Wv - dx1 + 1, dy1 - dy0);
+        if (dy0 > 0.5) ctx.drawImage(img, ix0, iy0, ix1 - ix0, 1, dx0, 0, dx1 - dx0, dy0 + 1);
+        if (dy1 < Hv - 0.5) ctx.drawImage(img, ix0, iy1 - 1, ix1 - ix0, 1, dx0, dy1 - 1, dx1 - dx0, Hv - dy1 + 1);
+        if (dx0 > 0.5 && dy0 > 0.5) ctx.drawImage(img, ix0, iy0, 1, 1, 0, 0, dx0 + 1, dy0 + 1);
+        if (dx1 < Wv - 0.5 && dy0 > 0.5) ctx.drawImage(img, ix1 - 1, iy0, 1, 1, dx1 - 1, 0, Wv - dx1 + 1, dy0 + 1);
+        if (dx0 > 0.5 && dy1 < Hv - 0.5) ctx.drawImage(img, ix0, iy1 - 1, 1, 1, 0, dy1 - 1, dx0 + 1, Hv - dy1 + 1);
+        if (dx1 < Wv - 0.5 && dy1 < Hv - 0.5) ctx.drawImage(img, ix1 - 1, iy1 - 1, 1, 1, dx1 - 1, dy1 - 1, Wv - dx1 + 1, Hv - dy1 + 1);
+        // 본 사진
+        ctx.drawImage(img, ix0, iy0, ix1 - ix0, iy1 - iy0, dx0, dy0, dx1 - dx0, dy1 - dy0);
+      } else {
+        drawProceduralScene(); // 뷰가 사진을 완전히 벗어난 극단 상황 폴백
+      }
     } else {
       drawProceduralScene();
     }
@@ -1224,7 +1352,9 @@
     }
     S.puffs = alive;
 
-    /* ===== 트레이서 ===== */
+    /* ===== 탄도 궤적 트레이서 =====
+     * 발사 후 스코프는 고정(격발 순간 카메라)되고, 탄이 낙하/편류하며
+     * 멀어질수록 작아지는 모습과 꼬리 궤적이 보인다. */
     if (S.activeShot) {
       const a = S.activeShot;
       const ft = t - a.t0;
@@ -1232,15 +1362,31 @@
       if (path && path.length > 1) {
         let idx = path.findIndex(pt => pt.t >= ft);
         if (idx < 0) idx = path.length - 1;
-        const pt = path[Math.max(0, idx)];
+        idx = Math.max(1, idx);
+        const scr = pt => ({
+          x: sx(Math.atan2(pt.z, pt.x) * 1000),
+          y: sy(relPitch(Math.atan2(pt.y, pt.x))),
+        });
+        // 꼬리: 최근 0.14초 구간을 점점 옅게
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (let j = idx; j > 1 && path[j - 1].t >= ft - 0.14 && path[j - 1].x > 3; j--) {
+          const p1 = scr(path[j]), p0 = scr(path[j - 1]);
+          const age = clamp((ft - path[j].t) / 0.14, 0, 1);
+          ctx.strokeStyle = `rgba(255,235,170,${0.55 * (1 - age)})`;
+          ctx.lineWidth = Math.max(1, 2.6 * (1 - age));
+          ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+        }
+        ctx.restore();
+        const pt = path[idx];
         if (pt.x > 3) {
-          const yawM = Math.atan2(pt.z, pt.x) * 1000;
-          const pitchM = relPitch(Math.atan2(pt.y, pt.x));
-          const bx = sx(yawM), by = sy(pitchM);
-          ctx.fillStyle = 'rgba(255,235,170,0.9)';
-          ctx.beginPath(); ctx.arc(bx, by, 2.2, 0, TAU); ctx.fill();
-          ctx.fillStyle = 'rgba(255,235,170,0.25)';
-          ctx.beginPath(); ctx.arc(bx, by, 5, 0, TAU); ctx.fill();
+          const b = scr(pt);
+          // 거리에 반비례해 작아지는 탄
+          const rad = clamp(ppmW * 24 / Math.max(pt.x, 12), 1.3, 8);
+          ctx.fillStyle = 'rgba(255,240,190,0.95)';
+          ctx.beginPath(); ctx.arc(b.x, b.y, rad, 0, TAU); ctx.fill();
+          ctx.fillStyle = 'rgba(255,235,170,0.28)';
+          ctx.beginPath(); ctx.arc(b.x, b.y, rad * 2.2, 0, TAU); ctx.fill();
         }
       }
     }
@@ -1465,11 +1611,18 @@
     const fovMrad = 16 / S.mag * 17.4533;
     const ppm = H / fovMrad;
 
-    let camYaw = S.aim.yaw + S.sway.yaw + S.recoil.yaw;
-    let camPitch = S.aim.pitch + S.sway.pitch + S.recoil.pitch;
-    if (t < S.shakeT) {
-      camYaw += (Math.random() - 0.5) * 3;
-      camPitch += (Math.random() - 0.5) * 3;
+    let camYaw, camPitch;
+    if (S.activeShot) {
+      // 탄 비행 중: 스코프 고정 (격발 순간 카메라) — 궤적 관측
+      camYaw = S.activeShot.cam.yaw;
+      camPitch = S.activeShot.cam.pitch;
+    } else {
+      camYaw = S.aim.yaw + S.sway.yaw + S.recoil.yaw;
+      camPitch = S.aim.pitch + S.sway.pitch + S.recoil.pitch;
+      if (t < S.shakeT) {
+        camYaw += (Math.random() - 0.5) * 3;
+        camPitch += (Math.random() - 0.5) * 3;
+      }
     }
 
     /* ── 패스 1: 스코프 밖 (1× 흐린 주변시) ── */
@@ -1499,7 +1652,7 @@
     drawScopeBody(cx, cy, R);
     drawReticle(cx, cy, R, ppm);
     drawTurrets(cx, cy, R);
-    drawZoomBar();
+    drawZoomRing(cx, cy, R);
     drawLed(cx, cy, R, S.mission);
 
     /* ── 탄 수 / 명중 기록 점 (스코프 좌상단, 크롭 시야 안) ── */
@@ -1599,13 +1752,16 @@
     ctx.restore();
   }
 
-  /* 터렛 노브: 상단(엘리베이션) / 우측(윈디지), 클릭에 따라 눈금 밴드 회전 */
+  /* 터렛 노브: 상단(엘리베이션) / 우측(윈디지), 클릭에 따라 눈금 밴드 회전
+   * — 1.5배 확대, 화면 안에 들어오도록 스코프 링에 살짝 겹쳐 배치 */
+  const TURRET_SCALE = 1.5;
   function drawTurrets(cx, cy, R) {
     const draw = (side, clicks, label) => {
       ctx.save();
       ctx.translate(cx, cy);
       if (side === 'right') ctx.rotate(Math.PI / 2);
-      ctx.translate(0, -(R + 8));
+      ctx.translate(0, -(R - 22));
+      ctx.scale(TURRET_SCALE, TURRET_SCALE);
       // 노브 몸통
       const kw = Math.min(190, R * 0.52), kh = 46;
       ctx.fillStyle = '#141614';
@@ -1643,8 +1799,13 @@
       ctx.beginPath();
       ctx.moveTo(0, -2); ctx.lineTo(-5, 7); ctx.lineTo(5, 7); ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = '#7d9484'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(label, 0, -kh - 7);
+      // 라벨: 노브 아래쪽 (확대로 상단이 화면 밖에 걸리지 않게 하단 배치)
+      ctx.fillStyle = 'rgba(8,10,8,0.6)';
+      roundRectAt(-37, 9, 74, 15, 4);
+      ctx.fill();
+      ctx.fillStyle = '#cfe3d4'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 0, 16.5);
       ctx.restore();
     };
     draw('top', S.dial.elev, `ELEV ${fmt(S.dial.elev * 0.1, 1)}`);
@@ -1660,44 +1821,67 @@
     }
   }
 
-  /* 우측 배율 바 (볼륨 버튼 스타일: 위 + / 아래 −, 트랙 드래그) */
-  function drawZoomBar() {
-    const cxB = 308; // (UI_ZBAR.x0 + UI_ZBAR.x1) / 2
-    const x0 = 276, x1 = 340, w = x1 - x0;
-    const plus0 = 588, plus1 = 636, tr0 = 642, tr1 = 816, min0 = 822, min1 = 870;
-    ctx.save();
-    const btn = (y0, y1, glyph) => {
-      ctx.fillStyle = 'rgba(12, 18, 14, 0.82)';
-      ctx.strokeStyle = '#3d5244';
-      ctx.lineWidth = 1.5;
-      roundRect(x0, y0, w, y1 - y0, 9);
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#cfe3d4';
-      ctx.font = '700 24px monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(glyph, cxB, (y0 + y1) / 2 + 1);
-    };
-    btn(plus0, plus1, '+');
-    btn(min0, min1, '−');
-    // 트랙
-    ctx.fillStyle = 'rgba(12, 18, 14, 0.82)';
-    ctx.strokeStyle = '#3d5244';
-    roundRect(cxB - 9, tr0, 18, tr1 - tr0, 9);
-    ctx.fill(); ctx.stroke();
-    // 채움 (배율 레벨)
+  /* 배율 조절 링: 스코프 링 9시~6시 원호를 드래그해 배율 조정.
+   * 9시 = 최소 배율, 6시 = 최대(25×). 현재 배율 위치에 스로우 레버 표시. */
+  const ZR_A0 = Math.PI / 2;   // 6시 (화면 좌표: 아래)
+  const ZR_A1 = Math.PI;       // 9시 (왼쪽)
+  function zoomRingAngle(mag) {
     const mn = S.magMin || 5;
-    const frac = clamp((S.mag - mn) / (25 - mn), 0, 1);
-    const fillH = (tr1 - tr0 - 8) * frac;
-    if (fillH > 2) {
-      ctx.fillStyle = 'rgba(143, 209, 79, 0.8)';
-      roundRect(cxB - 5, tr1 - 4 - fillH, 10, fillH, 5);
-      ctx.fill();
+    const f = clamp((mag - mn) / (25 - mn), 0, 1);
+    return ZR_A1 - f * (ZR_A1 - ZR_A0);
+  }
+  function magFromRingAngle(a) {
+    const mn = S.magMin || 5;
+    const f = clamp((ZR_A1 - a) / (ZR_A1 - ZR_A0), 0, 1);
+    return Math.round(mn + f * (25 - mn));
+  }
+  function drawZoomRing(cx, cy, R) {
+    const mn = S.magMin || 5;
+    const rIn = R * 1.05, rOut = R * 1.13; // 접안 고무링 위 밴드 (화면 안에 들어오는 반경)
+    ctx.save();
+    // 밴드
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOut, ZR_A0, ZR_A1);
+    ctx.arc(cx, cy, rIn, ZR_A1, ZR_A0, true);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(16,18,16,0.95)';
+    ctx.fill();
+    ctx.strokeStyle = '#3a413a'; ctx.lineWidth = 1.5; ctx.stroke();
+    // 눈금 + 배율 숫자
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let mg = mn; mg <= 25; mg++) {
+      const a = zoomRingAngle(mg);
+      const major = mg === mn || mg === 25 || mg % 5 === 0;
+      const rT = major ? rIn + (rOut - rIn) * 0.42 : rIn + (rOut - rIn) * 0.25;
+      ctx.strokeStyle = major ? '#cfd6cf' : '#6e766e';
+      ctx.lineWidth = major ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * rIn, cy + Math.sin(a) * rIn);
+      ctx.lineTo(cx + Math.cos(a) * rT, cy + Math.sin(a) * rT);
+      ctx.stroke();
+      if (major) {
+        ctx.fillStyle = '#cfd6cf'; ctx.font = '700 11px monospace';
+        const rL = rOut - (rOut - rIn) * 0.3;
+        ctx.fillText(String(mg), cx + Math.cos(a) * rL, cy + Math.sin(a) * rL);
+      }
     }
-    // 현재 배율
+    // 스로우 레버 (현재 배율 위치)
+    const a = zoomRingAngle(S.mag);
+    ctx.translate(cx, cy);
+    ctx.rotate(a);
+    ctx.fillStyle = '#0b0c0b';
+    ctx.strokeStyle = '#4a524a'; ctx.lineWidth = 1.5;
+    roundRect(R * 0.99, -R * 0.030, R * 0.145, R * 0.060, R * 0.028);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#e0a03c';
+    ctx.beginPath(); ctx.arc(R * 1.105, 0, R * 0.020, 0, TAU); ctx.fill();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // 현재 배율 표시 (7시30 방향 고정)
+    const tA = Math.PI * 0.75, tR = R * 1.30;
     ctx.fillStyle = '#cfe3d4';
-    ctx.font = '700 15px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${S.mag}×`, cxB, min1 + 18);
+    ctx.font = '700 17px monospace';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 6;
+    ctx.fillText(`${S.mag}×`, cx + Math.cos(tA) * tR, cy + Math.sin(tA) * tR);
     ctx.restore();
   }
 
@@ -2065,8 +2249,8 @@
   }
   function updateHelpText() {
     $('hud-help').innerHTML = S.controlMode === 'drag'
-      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 우측 바/휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석'
-      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석';
+      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석'
+      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석';
     const lk = $('tgl-look'); if (lk) lk.checked = S.controlMode === 'look';
   }
 
@@ -2088,39 +2272,45 @@
   document.addEventListener('mousemove', e => {
     if (S.phase !== 'play' || S.controlMode !== 'look' || !S.pointerLocked) return;
     const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
-    S.aim.yaw = clamp(S.aim.yaw + e.movementX * sens, -80, 80);
-    S.aim.pitch = clamp(S.aim.pitch - e.movementY * sens, -80, 80);
+    const L = aimLimits(S.mag);
+    S.aim.yaw = clamp(S.aim.yaw + e.movementX * sens, L.yawMin, L.yawMax);
+    S.aim.pitch = clamp(S.aim.pitch - e.movementY * sens, L.pitMin, L.pitMax);
   });
 
   /* ── 스코프 위 직접 조작 영역 (논리 좌표 1440×900 기준) ──
    *  상단 엘리베이션 노브: 드래그(좌우) 또는 중앙 기준 좌/우 터치
    *  우측 윈디지 노브: 드래그(상하) 또는 중앙 기준 상/하 터치
-   *  우측 배율 바: +/− 터치 또는 트랙 드래그 (볼륨 바) */
-  const UI_KNOB_E = { x0: 600, x1: 840, y0: 0, y1: 66 };
-  const UI_KNOB_W = { x0: 1108, x1: 1200, y0: 348, y1: 552 };
-  const UI_ZBAR = { x0: 276, x1: 340, plus0: 588, plus1: 636, tr0: 642, tr1: 816, min0: 822, min1: 870 };
+   *  스코프 링 9시~6시 원호: 드래그해 배율 조정 (배율 링) */
+  const UI_KNOB_E = { x0: 560, x1: 880, y0: 0, y1: 92 };
+  const UI_KNOB_W = { x0: 1080, x1: 1220, y0: 300, y1: 600 };
   const inRect = (p, r) => p.x >= r.x0 && p.x <= r.x1 && p.y >= r.y0 && p.y <= r.y1;
   function toLogical(e) {
     const r = canvas.getBoundingClientRect();
     return { x: (e.clientX - r.left) / r.width * BASE_W, y: (e.clientY - r.top) / r.height * BASE_H };
   }
-  function setMagFromY(y) {
-    const frac = clamp(1 - (y - UI_ZBAR.tr0) / (UI_ZBAR.tr1 - UI_ZBAR.tr0), 0, 1);
-    const next = Math.round((S.magMin || 5) + frac * (25 - (S.magMin || 5)));
-    if (next !== S.mag) { S.mag = next; }
+  /* 배율 링 히트 판정: 스코프 중심 기준 극좌표 (r은 스코프 반지름 배수) */
+  function zoomRingHit(p) {
+    const R = Math.min(BASE_W, BASE_H) * 0.44;
+    const dx = p.x - BASE_W / 2, dy = p.y - BASE_H / 2;
+    let a = Math.atan2(dy, dx);
+    if (a < 0) a += TAU; // 9시 바로 위 터치(−π 근처)도 π+ε로 취급
+    return { r: Math.hypot(dx, dy) / R, a };
+  }
+  function setMagFromRing(a) {
+    const next = magFromRingAngle(a);
+    if (next !== S.mag) { S.mag = next; playClick(); }
   }
   const KNOB_STEP = 13; // 논리 px 당 1클릭
   let uiDrag = null; // {kind, id, sx, sy, lx, ly, acc, moved}
   function uiPointerDown(e, p) {
+    const zr = zoomRingHit(p);
     if (inRect(p, UI_KNOB_E)) {
       uiDrag = { kind: 'elev', id: e.pointerId, sx: p.x, sy: p.y, lx: p.x, ly: p.y, acc: 0, moved: false };
     } else if (inRect(p, UI_KNOB_W)) {
       uiDrag = { kind: 'wind', id: e.pointerId, sx: p.x, sy: p.y, lx: p.x, ly: p.y, acc: 0, moved: false };
-    } else if (p.x >= UI_ZBAR.x0 && p.x <= UI_ZBAR.x1 && p.y >= UI_ZBAR.plus0 && p.y <= UI_ZBAR.min1) {
-      if (p.y <= UI_ZBAR.plus1) { S.mag = clamp(S.mag + 1, S.magMin || 5, 25); }
-      else if (p.y >= UI_ZBAR.min0) { S.mag = clamp(S.mag - 1, S.magMin || 5, 25); }
-      else setMagFromY(p.y);
-      uiDrag = { kind: 'zoom', id: e.pointerId, sx: p.x, sy: p.y, moved: false };
+    } else if (zr.r >= 0.97 && zr.r <= 1.55 && zr.a >= ZR_A0 - 0.12 && zr.a <= ZR_A1 + 0.12) {
+      setMagFromRing(zr.a);
+      uiDrag = { kind: 'zoomring', id: e.pointerId, sx: p.x, sy: p.y, moved: false };
     } else return false;
     canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
     S.lastHudUpdate = 0;
@@ -2137,8 +2327,8 @@
       u.acc += u.ly - p.y; u.ly = p.y;
       while (u.acc >= KNOB_STEP) { S.dial.wind++; playClick(); u.acc -= KNOB_STEP; }
       while (u.acc <= -KNOB_STEP) { S.dial.wind--; playClick(); u.acc += KNOB_STEP; }
-    } else if (u.kind === 'zoom' && p.y > UI_ZBAR.plus1 && p.y < UI_ZBAR.min0) {
-      setMagFromY(p.y);
+    } else if (u.kind === 'zoomring') {
+      setMagFromRing(zoomRingHit(p).a);
     }
     S.lastHudUpdate = 0;
   }
@@ -2174,8 +2364,9 @@
     dragState.lastX = e.clientX; dragState.lastY = e.clientY;
     if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > DRAG_THRESHOLD) dragState.moved = true;
     const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
-    S.aim.yaw = clamp(S.aim.yaw + dx * sens, -80, 80);
-    S.aim.pitch = clamp(S.aim.pitch - dy * sens, -80, 80);
+    const L = aimLimits(S.mag);
+    S.aim.yaw = clamp(S.aim.yaw + dx * sens, L.yawMin, L.yawMax);
+    S.aim.pitch = clamp(S.aim.pitch - dy * sens, L.pitMin, L.pitMax);
   });
   canvas.addEventListener('pointerup', e => {
     if (uiDrag && e.pointerId === uiDrag.id) { uiPointerUp(toLogical(e)); return; }
@@ -2346,8 +2537,9 @@
     bBtn.addEventListener('pointermove', e => {
       if (!holdPt || e.pointerId !== holdPt.id || S.phase !== 'play') return;
       const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1) * 0.35;
-      S.aim.yaw = clamp(S.aim.yaw + (e.clientX - holdPt.x) * sens, -80, 80);
-      S.aim.pitch = clamp(S.aim.pitch - (e.clientY - holdPt.y) * sens, -80, 80);
+      const L = aimLimits(S.mag);
+      S.aim.yaw = clamp(S.aim.yaw + (e.clientX - holdPt.x) * sens, L.yawMin, L.yawMax);
+      S.aim.pitch = clamp(S.aim.pitch - (e.clientY - holdPt.y) * sens, L.pitMin, L.pitMax);
       holdPt.x = e.clientX; holdPt.y = e.clientY;
     });
     const releaseBreath = e => {
@@ -2384,6 +2576,7 @@
         document.querySelectorAll('.cp-tab').forEach(x => x.classList.toggle('on', x === t));
         ['act', 'bal', 'siz'].forEach(k =>
           $('cp-' + k).classList.toggle('hidden', k !== t.dataset.cp));
+        S.lastHudUpdate = 0; // 탄도 표 등 즉시 갱신
       }));
 
     // 숨참기 (패널)
@@ -2441,34 +2634,6 @@
     tr.addEventListener('pointerup', trEnd);
     tr.addEventListener('pointercancel', trEnd);
 
-    // 탄도 탭: 고각/윈디지/배율 ± (홀드 반복)
-    let balTimer = null;
-    const balAct = k => {
-      switch (k) {
-        case 'elev+': S.dial.elev++; playClick(); break;
-        case 'elev-': S.dial.elev--; playClick(); break;
-        case 'wind+': S.dial.wind++; playClick(); break;
-        case 'wind-': S.dial.wind--; playClick(); break;
-        case 'zoom+': S.mag = clamp(S.mag + 1, S.magMin || 5, 25); break;
-        case 'zoom-': S.mag = clamp(S.mag - 1, S.magMin || 5, 25); break;
-      }
-      S.lastHudUpdate = 0;
-    };
-    document.querySelectorAll('.bal-btn').forEach(b => {
-      const k = b.dataset.bal;
-      b.addEventListener('pointerdown', e => {
-        e.preventDefault();
-        if (S.phase !== 'play') return;
-        balAct(k);
-        clearInterval(balTimer);
-        balTimer = setInterval(() => balAct(k), 140);
-      });
-      const end = () => { clearInterval(balTimer); balTimer = null; };
-      b.addEventListener('pointerup', end);
-      b.addEventListener('pointercancel', end);
-      b.addEventListener('pointerleave', end);
-      b.addEventListener('contextmenu', e => e.preventDefault());
-    });
   }
 
   /* 측거표: 거리별 표적 부위 mil 크기 */

@@ -89,7 +89,7 @@
 
   <!-- 도움말 (게임 시작 시 updateHelpText()가 조준 방식에 맞춰 덮어씀) -->
   <div id="hud-help" class="hud">
-    드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 조정 · 휠/우측 바: 배율 ·
+    드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 조정 · 링(9~6시) 드래그/휠: 배율 ·
     Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석
   </div>
 </div><!-- /#stage -->
@@ -114,40 +114,30 @@
       <button class="cp-tab" data-cp="siz">측거표</button>
     </div>
     <div class="cp-page" id="cp-act">
-      <div class="cp-col">
-        <div class="cp-label">숨 / 심박</div>
-        <button id="p-breath" class="p-breath">숨참기</button>
-        <div id="p-vitals" class="p-vitals">♥ 70 <small>BPM</small></div>
-        <div class="p-o2"><i id="p-o2fill"></i></div>
-      </div>
-      <div class="cp-col">
-        <div class="cp-label">방아쇠</div>
-        <div id="p-trigger" class="p-trigger">
-          <div class="pt-line"></div>
-          <div id="pt-handle" class="pt-handle"></div>
+      <div id="cp-status"></div>
+      <div class="cp-row">
+        <div class="cp-col">
+          <div class="cp-label">숨 / 심박</div>
+          <button id="p-breath" class="p-breath">숨참기</button>
+          <div id="p-vitals" class="p-vitals">♥ 70 <small>BPM</small></div>
+          <div class="p-o2"><i id="p-o2fill"></i></div>
         </div>
-      </div>
-      <div class="cp-col">
-        <div class="cp-label">바람 (사수 위치)</div>
-        <canvas id="m-wind" width="104" height="104"></canvas>
-        <div id="p-windtxt" class="p-windtxt"></div>
+        <div class="cp-col">
+          <div class="cp-label">방아쇠</div>
+          <div id="p-trigger" class="p-trigger">
+            <div class="pt-line"></div>
+            <div id="pt-handle" class="pt-handle"></div>
+          </div>
+        </div>
+        <div class="cp-col">
+          <div class="cp-label">바람 (사수 위치)</div>
+          <canvas id="m-wind" width="104" height="104"></canvas>
+          <div id="p-windtxt" class="p-windtxt"></div>
+        </div>
       </div>
     </div>
     <div class="cp-page hidden" id="cp-bal">
-      <div class="bal-rows">
-        <div class="bal-row"><span>고각</span>
-          <button class="bal-btn" data-bal="elev-">−</button>
-          <b id="bal-elev">0.0</b>
-          <button class="bal-btn" data-bal="elev+">＋</button><small>mil</small></div>
-        <div class="bal-row"><span>윈디지</span>
-          <button class="bal-btn" data-bal="wind-">−</button>
-          <b id="bal-wind">0.0</b>
-          <button class="bal-btn" data-bal="wind+">＋</button><small>mil</small></div>
-        <div class="bal-row"><span>배율</span>
-          <button class="bal-btn" data-bal="zoom-">−</button>
-          <b id="bal-zoom">12</b>
-          <button class="bal-btn" data-bal="zoom+">＋</button><small>×</small></div>
-      </div>
+      <div id="bal-info"></div>
       <div id="dope-mini"></div>
     </div>
     <div class="cp-page hidden" id="cp-siz">
