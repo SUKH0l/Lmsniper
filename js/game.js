@@ -1912,10 +1912,11 @@
       }
     };
     /* 0.1 단위 미세 눈금 (실측용) — 0.5 위치는 조금 길게.
-     * 간격이 3px 미만이면 뭉개져서 오히려 정밀도를 해치므로 생략한다. */
+     * 간격이 2px 미만이면 뭉개져서 오히려 정밀도를 해치므로 생략한다.
+     * axes: 'both' = 십자 전체 · 'h' = 수평만 · 'down' = 하방 수직만 */
     const microTicks = (unitPx, maxU, axes = 'both') => {
       const step = unitPx * 0.1;
-      if (step < 3) return;
+      if (step < 2) return;
       ctx.lineWidth = fine;
       ctx.beginPath();
       for (let t = 1; t < maxU * 10; t++) {
@@ -1923,6 +1924,10 @@
         const len = (t % 5 === 0 ? 0.07 : 0.04) * ppm;
         const off = t * step;
         if (off >= R * 0.92) break;
+        if (axes === 'down') {
+          ctx.moveTo(cx - len, cy + off); ctx.lineTo(cx + len, cy + off);
+          continue;
+        }
         for (const s of [-1, 1]) {
           ctx.moveTo(cx + s * off, cy - len); ctx.lineTo(cx + s * off, cy + len);
           if (axes === 'both') {
@@ -2030,6 +2035,7 @@
         }
         ctx.stroke();
         microTicks(ppm, 15, 'h');
+        microTicks(ppm, 10, 'down');              // 드롭 라인도 0.1 mil 실측 눈금
         dot(cx, cy, Math.max(1.2, 0.06 * ppm));   // 중앙 조준점 (조명 도트)
         // 스타디아 측거 바 — 기준선~바 높이 = 10/n mil (1 m 표적, 숫자 n = ×100 m)
         const by = cy + 7.2 * ppm;
@@ -2096,11 +2102,19 @@
             ctx.stroke();
           };
           curve(15); curve(5);
+          // 수치별 세로 눈금 — 곡선 위에 세워 표적 상단을 맞추는 기준선
+          ctx.beginPath();
+          for (let n = 2; n <= 10; n += 2) {
+            const x = lerp(bx0, bx1, (10 - n) / 8);
+            const h = (15 / n) * ppm * 0.35;
+            ctx.moveTo(x, by - h); ctx.lineTo(x, by - h - 0.3 * ppm);
+          }
+          ctx.stroke();
           if (fits(ppm * 0.9)) {
             ctx.font = `700 ${Math.max(9 / tsc, ppm * 0.2)}px sans-serif`;
             for (const n of [10, 8, 6, 4, 2]) {
               const x = lerp(bx0, bx1, (10 - n) / 8);
-              label(n, x, by - (15 / n) * ppm * 0.35 - 0.35 * ppm);
+              label(n, x, by - (15 / n) * ppm * 0.35 - 0.3 * ppm - 0.3 * ppm);
             }
             label('1.5', bx1 + 0.6 * ppm, by - (15 / 2) * ppm * 0.35);
             label('0.5', bx1 + 0.6 * ppm, by - (5 / 2) * ppm * 0.35);
