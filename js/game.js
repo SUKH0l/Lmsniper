@@ -1745,7 +1745,7 @@
    * 검정 단색 레티클은 헛간 그늘·숲처럼 어두운 배경에서 그대로 소멸한다.
    * 마스크를 만들어 테두리(헤일로)·굵기·조명색을 합성해 대비를 확보한다. */
   const RET_STYLES = [
-    { id: 'bold',        name: '굵게',        lw: 2.2 },                                    // 기본값
+    { id: 'bold',        name: '굵게',        lw: 1.8 },                                    // 기본값
     { id: 'outline',     name: '흰 테두리',   lw: 1,   halo: 'rgba(252,255,252,0.95)' },
     { id: 'glow',        name: '흰 글로우',   lw: 1,   glow: 'rgba(255,255,255,0.95)' },
     { id: 'red',         name: '적색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#ff2e1f' },
@@ -1761,7 +1761,7 @@
    * 일정하도록 stageScale로 역보정한다. 논리 캔버스(1440×900)가 모바일
    * 세로에선 ≈0.43배로 축소되고 데스크톱 1080p에선 1.2배로 확대되기 때문에,
    * 보정 없이는 같은 1px이 0.43 CSS px과 1.2 CSS px으로 3배 가까이 벌어진다. */
-  const TARGET_CSS_PX = 1.5;
+  const TARGET_CSS_PX = 1.0;   // 실제 LRS 앱 실측 비율(스코프 지름의 ~1/200)에 맞춘 값
   const RET_CAP_MIL = 0.14;   // 저배율에서 선이 눈금 간격을 잡아먹지 않도록 하는 상한
   function fineWidth(ppm, lw = 1, w = {}) {
     const sc = clamp(w.scale ?? S.stageScale ?? 1, 0.4, 1.3);
@@ -1861,7 +1861,7 @@
     /* 눈금 숫자: 논리 10px 고정이던 것을 stageScale 역보정해 기기와 무관하게
      * 같은 CSS 크기로 읽히게 한다 (모바일에선 기존 4.4 CSS px → 11 CSS px). */
     const tsc = clamp(w?.scale ?? S.stageScale ?? 1, 0.4, 1.3);
-    const fontPx = Math.max(11 / tsc, ppm * 0.26);
+    const fontPx = Math.max(10 / tsc, ppm * 0.26);
     ctx.font = `700 ${fontPx}px sans-serif`;
     /* 숫자는 배경이 무엇이든 읽혀야 하므로 코어 패스에서 밝은 외곽선을 두른다.
      * (테두리 없는 '굵게' 스타일에서도 숫자만은 확실히 보이게) */
