@@ -103,9 +103,56 @@
   <!-- 모바일 상단 정보바 -->
   <div id="mobile-top" class="hidden">
     <span id="mt-info"></span>
-    <button class="mt-btn" id="mt-hl">HL</button>
-    <button class="mt-btn" id="mt-dope">DOPE</button>
-    <button class="mt-btn" id="mt-menu">메뉴</button>
+    <button class="mt-btn" id="mt-menu">나가기</button>
+  </div>
+
+  <!-- 세로형 컨트롤 패널 (레퍼런스 스타일: 조작/탄도/측거표 탭) -->
+  <div id="ctl-panel" class="hidden">
+    <div class="cp-tabs">
+      <button class="cp-tab on" data-cp="act">조 작</button>
+      <button class="cp-tab" data-cp="bal">탄 도</button>
+      <button class="cp-tab" data-cp="siz">측거표</button>
+    </div>
+    <div class="cp-page" id="cp-act">
+      <div class="cp-col">
+        <div class="cp-label">숨 / 심박</div>
+        <button id="p-breath" class="p-breath">숨참기</button>
+        <div id="p-vitals" class="p-vitals">♥ 70 <small>BPM</small></div>
+        <div class="p-o2"><i id="p-o2fill"></i></div>
+      </div>
+      <div class="cp-col">
+        <div class="cp-label">방아쇠</div>
+        <div id="p-trigger" class="p-trigger">
+          <div class="pt-line"></div>
+          <div id="pt-handle" class="pt-handle"></div>
+        </div>
+      </div>
+      <div class="cp-col">
+        <div class="cp-label">바람 (사수 위치)</div>
+        <canvas id="m-wind" width="104" height="104"></canvas>
+        <div id="p-windtxt" class="p-windtxt"></div>
+      </div>
+    </div>
+    <div class="cp-page hidden" id="cp-bal">
+      <div class="bal-rows">
+        <div class="bal-row"><span>고각</span>
+          <button class="bal-btn" data-bal="elev-">−</button>
+          <b id="bal-elev">0.0</b>
+          <button class="bal-btn" data-bal="elev+">＋</button><small>mil</small></div>
+        <div class="bal-row"><span>윈디지</span>
+          <button class="bal-btn" data-bal="wind-">−</button>
+          <b id="bal-wind">0.0</b>
+          <button class="bal-btn" data-bal="wind+">＋</button><small>mil</small></div>
+        <div class="bal-row"><span>배율</span>
+          <button class="bal-btn" data-bal="zoom-">−</button>
+          <b id="bal-zoom">12</b>
+          <button class="bal-btn" data-bal="zoom+">＋</button><small>×</small></div>
+      </div>
+      <div id="dope-mini"></div>
+    </div>
+    <div class="cp-page hidden" id="cp-siz">
+      <div id="sizes-table"></div>
+    </div>
   </div>
 </div>
 
@@ -137,8 +184,54 @@
   </div>
 </div>
 
+<!-- ===== 클래스룸 (레슨) ===== -->
+<div id="classroom" class="overlay hidden">
+  <div class="menu-inner">
+    <h2 class="page-title">클래스룸</h2>
+    <p class="page-sub">레슨 — 전부 무료</p>
+    <div id="lesson-list" class="lesson-grid"></div>
+  </div>
+</div>
+
+<!-- ===== 레슨 뷰어 ===== -->
+<div id="lesson-view" class="overlay hidden">
+  <div class="menu-inner lesson-inner">
+    <button id="lesson-back" class="btn-back">← 클래스룸</button>
+    <h2 id="lesson-title" class="page-title"></h2>
+    <div id="lesson-body"></div>
+    <button id="lesson-back2" class="btn-back">← 클래스룸</button>
+  </div>
+</div>
+
+<!-- ===== 설정 ===== -->
+<div id="settings" class="overlay hidden">
+  <div class="menu-inner">
+    <h2 class="page-title">설정</h2>
+    <div class="set-group">
+      <label class="set-row"><span>거리 하이라이트<br><small>DOPE 표의 현재 사거리 강조 (끄면 측거 훈련)</small></span>
+        <input type="checkbox" id="set-hl" checked></label>
+      <label class="set-row" id="set-look-row"><span>마우스룩 조준<br><small>데스크톱: 클릭해 포인터 잠금 후 마우스로 조준</small></span>
+        <input type="checkbox" id="set-look"></label>
+      <label class="set-row"><span>사운드<br><small>총성·터렛 클릭·바람 소리</small></span>
+        <input type="checkbox" id="set-sound" checked></label>
+    </div>
+    <p class="menu-refs" style="text-align:left">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
+      Cranz &amp; Becker <i>Handbook of Ballistics Vol.1</i> ·
+      김건인 외 "탄도방정식을 이용한 화력 성능 분석에 관한 연구" (KSME 2017)<br>
+      총기·탄약 설명 출처: 각 제조사 공식 페이지 (카드에 표기) · 모든 콘텐츠 무료 개방</p>
+  </div>
+</div>
+
+<!-- ===== 하단 내비게이션 (모바일) ===== -->
+<nav id="mnav" class="hidden">
+  <button class="mnav-btn on" data-tab="simulator"><span class="mi">◎</span>시뮬레이터</button>
+  <button class="mnav-btn" data-tab="classroom"><span class="mi">≣</span>클래스룸</button>
+  <button class="mnav-btn" data-tab="settings"><span class="mi">⚙</span>설정</button>
+</nav>
+
 <script src="js/ballistics.js"></script>
 <script src="js/data.js"></script>
+<script src="js/lessons.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

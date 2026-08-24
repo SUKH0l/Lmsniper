@@ -49,6 +49,9 @@
     magMin: 5,
     stageScale: 1,
     assistHL: true,     // DOPE 거리 하이라이트 토글
+    muted: false,
+    navTab: 'simulator',
+    bigMsg: null,       // {text, color, until} — HIT/MISS 대형 표시
     fireHold: false,    // 발사 버튼 홀드(숨참기) 중
     _uiClick: false,
   };
@@ -89,6 +92,7 @@
   }
   // 짧은 기계음 도우미: 대역 통과 노이즈 버스트
   function mechBurst(when, freq, dur, vol, q = 6) {
+    if (S.muted) return;
     const ac = audio(); if (!ac) return;
     const t = ac.currentTime + when;
     const buf = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate);
@@ -100,6 +104,7 @@
     src.connect(bp).connect(g).connect(ac.destination); src.start(t);
   }
   function playShot() {
+    if (S.muted) return;
     const ac = audio(); if (!ac) return;
     const t = ac.currentTime;
     // 총성: 광대역 노이즈 + 저역 붐
@@ -151,12 +156,14 @@
   }
   function updateWindAmbience() {
     if (!windAmb || !AC) return;
+    if (S.muted) { windAmb.gain.gain.setTargetAtTime(0, AC.currentTime, 0.2); return; }
     const w = S.windShooterNow ?? S.windNow;
     const target = clamp(w / 14, 0, 1) * 0.22;
     windAmb.gain.gain.setTargetAtTime(S.phase === 'play' ? target : 0, AC.currentTime, 0.4);
     windAmb.filter.frequency.setTargetAtTime(280 + w * 45, AC.currentTime, 0.6);
   }
   function playDing(delay) {
+    if (S.muted) return;
     const ac = audio(); if (!ac) return;
     const t = ac.currentTime + delay;
     [1567, 2349].forEach((f, i) => {
@@ -169,6 +176,7 @@
     });
   }
   function playThud(delay) {
+    if (S.muted) return;
     const ac = audio(); if (!ac) return;
     const t = ac.currentTime + delay;
     const o = ac.createOscillator(), g = ac.createGain();
@@ -287,6 +295,7 @@
     });
     html += '</table><div class="note">고각: 100m 영점 기준 상향 mil · 풍속열: full-value 측풍 편류 mil<br>1 클릭 = 0.1 mil · 사선풍은 cos 성분 적용</div>';
     $('dope-table').innerHTML = html;
+    const mini = $('dope-mini'); if (mini) mini.innerHTML = html;
   }
 
   /* ---------------- 배경 사진 파이프라인 ---------------- */
@@ -444,6 +453,7 @@
       (cCount ? ` · 민간인 ${cCount} (사격 금지!)` : '') +
       (situation !== 'none' ? ` · ${SITUATION_TEXT[situation].split(' — ')[0]}` : ''), 6);
     buildDope();
+    buildSizes();
     updateHelpText();
     updateTouchBar();
     resize();
@@ -583,6 +593,7 @@
       tg.marks.push({ dy: res.hitAt.dy, dz: res.hitAt.dz });
       if (tg.type === 'civilian') {
         playThud(tg.dh / 343);
+        S.bigMsg = { text: tg.hostage ? '인질 피격' : '민간인 피격', color: '#e05c4a', until: now() + 2.2 };
         S.shots.push({ hit: true, civilian: true });
         setMsg(tg.hostage ? '인질 피격!' : '민간인 피격!', 4);
         endMission(false, tg.hostage ? '인질 피격 — 구출 실패' : '민간인 피격 — 교전 수칙 위반');
@@ -590,6 +601,7 @@
       }
       playDing(tg.dh / 343);
       const bonus = res.hitZone.zone === '머리' ? 2 : 0;
+      S.bigMsg = { text: bonus ? '헤드샷' : '명중', color: '#8fd14f', until: now() + 1.6 };
       const pts = res.hitZone.score + bonus + (S.firedTotal === 1 ? 5 : 0);
       S.score += pts;
       S.shots.push({ hit: true, zone: res.hitZone.zone });
@@ -599,6 +611,7 @@
       if (remain === 0) endMission(true, '모든 표적 제압');
     } else {
       playThud(S.mission.distanceM / 343);
+      S.bigMsg = { text: '빗나감', color: '#e0a03c', until: now() + 1.4 };
       S.shots.push({ hit: false });
       const mi = res.missInfo;
       if (mi) {
@@ -669,8 +682,8 @@
     const env = S.mission.env;
     const gust = env.gustiness || 0.2;
 
-    // ── 임무 타이머 ──
-    if (!S.ending) {
+    // ── 임무 타이머 (클래스룸/설정 열람 중엔 일시정지) ──
+    if (!S.ending && !uiOverlayOpen()) {
       S.timeLeft -= dt;
       if (S.timeLeft <= 0) { S.timeLeft = 0; endMission(false, '시간 초과'); }
     }
@@ -708,6 +721,7 @@
         if (S.fireHold) { // 숨을 더 못 참으면 숨참기 자동 해제
           S.fireHold = false;
           const b = $('btn-breath'); if (b) b.classList.remove('on');
+          const p = $('p-breath'); if (p) p.classList.remove('on');
           setMsg('숨이 찼다 — 호흡 회복 중', 2);
         }
       }
@@ -738,7 +752,14 @@
 
   /* ---------------- 풍향풍속계 위젯 ---------------- */
   function drawWindMeter() {
-    const c = windCx, Wc = windCv.width, Hc = windCv.height;
+    drawWindRose(windCx, windCv.width, windCv.height);
+    const mw = $('m-wind');
+    if (mw && !$('ctl-panel').classList.contains('hidden')) {
+      drawWindRose(mw.getContext('2d'), mw.width, mw.height);
+    }
+    drawWindHistory();
+  }
+  function drawWindRose(c, Wc, Hc) {
     const cx = Wc / 2, cy = Hc / 2, R = Wc / 2 - 10;
     c.clearRect(0, 0, Wc, Hc);
     if (S.phase !== 'play') return;
@@ -784,7 +805,10 @@
     c.fillText(S.windMeas.toFixed(1), cx, cy - 4);
     c.fillStyle = '#7d9484'; c.font = '9px sans-serif';
     c.fillText('m/s', cx, cy + 10);
-
+  }
+  function drawWindHistory() {
+    if (S.phase !== 'play') return;
+    const fireAz = S.mission.env.fireAzimuthDeg;
     // 디지털 표시
     const relDeg = ((S.windDirMeas - fireAz) % 360 + 360) % 360;
     const clock = Math.round(relDeg / 30) % 12 || 12;
@@ -861,9 +885,24 @@
     // 모바일 상단 정보바
     if (!$('mobile-top').classList.contains('hidden')) {
       $('mt-info').textContent =
-        `⏱${clock} · 적${hostRemain}` + (civCount ? `·민${civCount}` : '') +
-        ` · ${S.windMeas.toFixed(1)}㎧ ${Math.round(((S.windDirMeas % 360) + 360) % 360)}°` +
-        ` · E${(S.dial.elev * 0.1).toFixed(1)} W${(S.dial.wind * 0.1).toFixed(1)} · ${S.mag}×`;
+        `⏱${clock} · 적 ${hostRemain}` + (civCount ? ` · 민간인 ${civCount}` : '') +
+        ` · ${S.score}점` +
+        (m.situation && m.situation !== 'none' ? ` · ${SITUATION_TEXT[m.situation].split(' — ')[0]}` : '');
+    }
+    // 컨트롤 패널 수치
+    if (!$('ctl-panel').classList.contains('hidden')) {
+      $('p-vitals').innerHTML = `♥ ${Math.round(S.heartRate)} <small>BPM</small>`;
+      $('p-o2fill').style.width = `${S.o2}%`;
+      $('bal-elev').textContent = (S.dial.elev * 0.1).toFixed(1);
+      $('bal-wind').textContent = (S.dial.wind * 0.1).toFixed(1);
+      $('bal-zoom').textContent = S.mag;
+      if (S.windHist.length) {
+        const vs = S.windHist.map(p => p.v);
+        const avg = vs.reduce((a, b) => a + b, 0) / vs.length;
+        $('p-windtxt').innerHTML =
+          `CUR <b>${S.windMeas.toFixed(1)}</b> ㎧ · ${Math.round(((S.windDirMeas % 360) + 360) % 360)}°<br>` +
+          `AVG ${avg.toFixed(1)} · MAX ${Math.max(...vs).toFixed(1)}`;
+      }
     }
 
     $('hud-log').textContent = now() < S.msgUntil ? S.msg : '';
@@ -881,16 +920,20 @@
     const st = $('stage');
     $('game').classList.toggle('mobile-sq', !!(coarse && portrait));
     if (coarse && portrait) {
-      // 모바일 세로: 화면 폭 = 정사각 한 변. 스테이지 세로(900)를 그 변에 맞추고
-      // 좌우는 잘려 보이게 (조준경 비율 유지, 스코프 중심 고정)
-      const side = window.innerWidth;
+      // 모바일 세로: 상단바(34) + 스코프(정사각, 좌우 크롭) + 컨트롤 패널 + 내비(56)
+      const TOPBAR = 34, NAV = 56;
+      const panelH = clamp(Math.round(window.innerHeight * 0.34), 232, 400);
+      const side = Math.min(window.innerWidth,
+        window.innerHeight - TOPBAR - NAV - panelH);
       sc = side / BASE_H;
       if (st) {
         st.style.transform = `translate(-50%, -50%) scale(${sc})`;
-        // 상단 정보바(34px)와 발사 버튼 영역(하단 180px) 사이 중앙에 배치
-        const top = 38, bottom = window.innerHeight - 180;
-        const half = (BASE_H * sc) / 2;
-        st.style.top = `${clamp((top + bottom) / 2, top + half, Math.max(top + half, bottom - half))}px`;
+        st.style.top = `${TOPBAR + (BASE_H * sc) / 2}px`;
+      }
+      const cp = $('ctl-panel');
+      if (cp) {
+        cp.style.top = `${TOPBAR + side}px`;
+        cp.style.bottom = `${NAV}px`;
       }
     } else {
       sc = Math.min(window.innerWidth / BASE_W, window.innerHeight / BASE_H);
@@ -1458,6 +1501,37 @@
     drawTurrets(cx, cy, R);
     drawZoomBar();
     drawLed(cx, cy, R, S.mission);
+
+    /* ── 탄 수 / 명중 기록 점 (스코프 좌상단, 크롭 시야 안) ── */
+    {
+      const dx0 = 292, dy0 = 56, r0 = 7, gap = 22;
+      for (let i = 0; i < S.rifle.magCapacity; i++) {
+        ctx.beginPath();
+        ctx.arc(dx0 + i * gap, dy0, r0, 0, TAU);
+        if (i < S.magazine) { ctx.fillStyle = '#d9e4d9'; ctx.fill(); }
+        else { ctx.strokeStyle = 'rgba(217,228,217,0.4)'; ctx.lineWidth = 2; ctx.stroke(); }
+      }
+      const recent = S.shots.slice(-10);
+      recent.forEach((sh, i) => {
+        ctx.beginPath();
+        ctx.arc(dx0 + i * gap, dy0 + 24, 5, 0, TAU);
+        ctx.fillStyle = sh.civilian ? '#b06ad1' : (sh.hit ? '#8fd14f' : '#e05c4a');
+        ctx.fill();
+      });
+    }
+
+    /* ── HIT/MISS 대형 표시 ── */
+    if (S.bigMsg && t < S.bigMsg.until) {
+      const age = S.bigMsg.until - t;
+      ctx.save();
+      ctx.globalAlpha = clamp(age / 0.5, 0, 1);
+      ctx.fillStyle = S.bigMsg.color;
+      ctx.font = '800 64px "Pretendard","Noto Sans KR",sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 12;
+      ctx.fillText(S.bigMsg.text, cx, cy - R * 0.32);
+      ctx.restore();
+    }
 
     if (S.controlMode === 'look' && !S.pointerLocked && S.phase === 'play') {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -2108,7 +2182,8 @@
     if (S.controlMode !== 'drag' || !dragState || e.pointerId !== dragState.id) return;
     const wasTap = !dragState.moved;
     dragState = null;
-    if (S.phase === 'play' && wasTap) fire();
+    // 세로 모바일은 방아쇠 슬라이더로만 격발 (오발 방지)
+    if (S.phase === 'play' && wasTap && !$('game').classList.contains('mobile-sq')) fire();
   });
   canvas.addEventListener('pointercancel', () => { dragState = null; uiDrag = null; });
   window.addEventListener('wheel', e => {
@@ -2144,18 +2219,117 @@
     setControlMode(e.target.checked ? 'look' : 'drag');
   });
 
-  /* ---------------- 모바일 터치 컨트롤 ---------------- */
+  /* ================================================================
+   * 앱 셸: 하단 내비(시뮬레이터/클래스룸/설정) + 모바일 크롬 관리
+   *  - 모바일 세로 플레이: 상단 정보바 + 스코프 + 컨트롤 패널 + 내비
+   *  - 모바일 가로 플레이: 기존 숨참기/발사 플로팅 버튼
+   * ================================================================ */
   const coarsePointer = window.matchMedia && matchMedia('(pointer: coarse)');
-  function updateTouchBar() {
-    const coarse = coarsePointer && coarsePointer.matches;
-    const show = S.phase === 'play' && coarse;
-    $('touch-bar').classList.toggle('hidden', !show);
-    $('mobile-top').classList.toggle('hidden', !show);
-    $('tgl-look-row').classList.toggle('hidden', !!coarse); // 터치 기기에선 마우스룩 숨김
+  const isCoarse = () => coarsePointer && coarsePointer.matches;
+  const isPortrait = () => window.innerHeight > window.innerWidth * 1.05;
+
+  function uiOverlayOpen() {
+    return !$('classroom').classList.contains('hidden') ||
+      !$('settings').classList.contains('hidden') ||
+      !$('lesson-view').classList.contains('hidden');
   }
+
+  function updateTouchBar() { // (이름 유지 — 크롬 전체 관리)
+    const coarse = isCoarse();
+    const portrait = isPortrait();
+    const playing = S.phase === 'play';
+    const mp = coarse && portrait;                 // 모바일 세로
+    $('touch-bar').classList.toggle('hidden', !(playing && coarse && !portrait));
+    $('mobile-top').classList.toggle('hidden', !(playing && mp));
+    $('ctl-panel').classList.toggle('hidden', !(playing && mp));
+    // 내비: 메뉴/클래스룸/설정 화면에선 항상, 플레이 중엔 모바일 세로에서만
+    const navShow = !playing || mp;
+    $('mnav').classList.toggle('hidden', !navShow);
+    document.body.classList.toggle('has-nav', navShow);
+    $('tgl-look-row').classList.toggle('hidden', !!coarse);
+    const slr = $('set-look-row'); if (slr) slr.classList.toggle('hidden', !!coarse);
+  }
+
+  /* ── 하단 내비 탭 전환 ── */
+  function switchTab(tab) {
+    S.navTab = tab;
+    document.querySelectorAll('#mnav .mnav-btn').forEach(b =>
+      b.classList.toggle('on', b.dataset.tab === tab));
+    $('classroom').classList.toggle('hidden', tab !== 'classroom');
+    $('settings').classList.toggle('hidden', tab !== 'settings');
+    if (tab !== 'classroom') $('lesson-view').classList.add('hidden');
+  }
+  document.querySelectorAll('#mnav .mnav-btn').forEach(b =>
+    b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+  /* ── 클래스룸: 레슨 목록 + 뷰어 (전부 무료) ── */
+  function drawDiagramTo(cv, key) {
+    const fn = Diagrams[key];
+    if (!fn) return;
+    fn(cv.getContext('2d'), cv.width, cv.height);
+  }
+  function buildClassroom() {
+    const list = $('lesson-list');
+    list.innerHTML = '';
+    for (const L of Lessons) {
+      const el = document.createElement('div');
+      el.className = 'lesson-card';
+      const cv = document.createElement('canvas');
+      cv.width = 640; cv.height = 340;
+      el.appendChild(cv);
+      el.insertAdjacentHTML('beforeend', `<div class="lc-title">${L.title}</div>`);
+      drawDiagramTo(cv, L.thumb);
+      el.onclick = () => openLesson(L);
+      list.appendChild(el);
+    }
+  }
+  function openLesson(L) {
+    $('lesson-title').textContent = L.title;
+    const body = $('lesson-body');
+    body.innerHTML = '';
+    for (const sec of L.sections) {
+      const div = document.createElement('div');
+      div.className = 'lesson-sec';
+      if (sec.d) {
+        const cv = document.createElement('canvas');
+        cv.width = 640; cv.height = 320;
+        div.appendChild(cv);
+        drawDiagramTo(cv, sec.d);
+      }
+      div.insertAdjacentHTML('beforeend', `<h3>${sec.h}</h3><p>${sec.b}</p>`);
+      body.appendChild(div);
+    }
+    $('classroom').classList.add('hidden');
+    $('lesson-view').classList.remove('hidden');
+    $('lesson-view').scrollTop = 0;
+  }
+  const backToClassroom = () => {
+    $('lesson-view').classList.add('hidden');
+    $('classroom').classList.remove('hidden');
+  };
+  $('lesson-back').onclick = backToClassroom;
+  $('lesson-back2').onclick = backToClassroom;
+
+  /* ── 설정 ── */
+  function syncSettingsUI() {
+    $('set-hl').checked = S.assistHL;
+    $('tgl-hl').checked = S.assistHL;
+    const sl = $('set-look'); if (sl) sl.checked = S.controlMode === 'look';
+    $('set-sound').checked = !S.muted;
+  }
+  $('set-hl').addEventListener('change', e => {
+    S.assistHL = e.target.checked; S._dopeHint = null; syncSettingsUI();
+  });
+  $('set-look').addEventListener('change', e => {
+    setControlMode(e.target.checked ? 'look' : 'drag');
+  });
+  $('set-sound').addEventListener('change', e => {
+    S.muted = !e.target.checked;
+    if (windAmb && AC) windAmb.gain.gain.setTargetAtTime(0, AC.currentTime, 0.1);
+  });
+
+  /* ── 가로 모바일: 숨참기/발사 플로팅 버튼 (기존 유지) ── */
   {
-    // 좌측 숨참기 버튼: 꾹 누르면 숨참기 + 그대로 손가락을 움직이면 조준 이동.
-    // 산소가 다 떨어지면 자동으로 숨참기가 풀린다 (발사는 우측 버튼).
     const bBtn = $('btn-breath');
     let holdPt = null;
     bBtn.addEventListener('pointerdown', e => {
@@ -2171,7 +2345,6 @@
     });
     bBtn.addEventListener('pointermove', e => {
       if (!holdPt || e.pointerId !== holdPt.id || S.phase !== 'play') return;
-      // 숨참기 중 조준 이동 (미세 조준: 일반 감도의 35%)
       const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1) * 0.35;
       S.aim.yaw = clamp(S.aim.yaw + (e.clientX - holdPt.x) * sens, -80, 80);
       S.aim.pitch = clamp(S.aim.pitch - (e.clientY - holdPt.y) * sens, -80, 80);
@@ -2188,7 +2361,6 @@
     bBtn.addEventListener('pointercancel', releaseBreath);
     bBtn.addEventListener('contextmenu', e => e.preventDefault());
 
-    // 우측 발사 버튼
     const fBtn = $('btn-fire');
     fBtn.addEventListener('pointerdown', e => {
       e.preventDefault();
@@ -2199,17 +2371,119 @@
     });
     fBtn.addEventListener('contextmenu', e => e.preventDefault());
 
-    // 상단 바 버튼
     $('mt-menu').addEventListener('click', () => backToMenu());
-    $('mt-hl').addEventListener('click', () => {
-      S.assistHL = !S.assistHL;
-      $('mt-hl').classList.toggle('off', !S.assistHL);
-      const hl = $('tgl-hl'); if (hl) hl.checked = S.assistHL;
-      S._dopeHint = null;
+  }
+
+  /* ================================================================
+   * 세로형 컨트롤 패널 (레퍼런스 스타일)
+   * ================================================================ */
+  {
+    // 탭 전환
+    document.querySelectorAll('.cp-tab').forEach(t =>
+      t.addEventListener('click', () => {
+        document.querySelectorAll('.cp-tab').forEach(x => x.classList.toggle('on', x === t));
+        ['act', 'bal', 'siz'].forEach(k =>
+          $('cp-' + k).classList.toggle('hidden', k !== t.dataset.cp));
+      }));
+
+    // 숨참기 (패널)
+    const pb = $('p-breath');
+    pb.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (S.phase !== 'play') return;
+      audio() && AC.state === 'suspended' && AC.resume();
+      startWindAmbience();
+      pb.setPointerCapture && pb.setPointerCapture(e.pointerId);
+      S.fireHold = true;
+      S.holdingBreath = true;
+      pb.classList.add('on');
     });
-    $('mt-dope').addEventListener('click', () => {
-      $('hud-dope').classList.toggle('mobile-overlay');
+    const pbEnd = () => { S.fireHold = false; S.holdingBreath = false; pb.classList.remove('on'); };
+    pb.addEventListener('pointerup', pbEnd);
+    pb.addEventListener('pointercancel', pbEnd);
+    pb.addEventListener('contextmenu', e => e.preventDefault());
+
+    // 방아쇠 슬라이더: 아래로 당겨 빨간 선을 넘기면 격발
+    const tr = $('p-trigger'), th = $('pt-handle');
+    let trDrag = null;
+    const setHandle = frac => { // 0(위) ~ 1(끝)
+      const r = tr.getBoundingClientRect();
+      const maxTop = r.height * 0.62 - 6;
+      th.style.top = `${6 + frac * maxTop}px`;
+    };
+    tr.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (S.phase !== 'play') return;
+      audio() && AC.state === 'suspended' && AC.resume();
+      startWindAmbience();
+      tr.setPointerCapture && tr.setPointerCapture(e.pointerId);
+      trDrag = { id: e.pointerId, startY: e.clientY, fired: false };
+      th.classList.add('armed');
     });
+    tr.addEventListener('pointermove', e => {
+      if (!trDrag || e.pointerId !== trDrag.id) return;
+      const r = tr.getBoundingClientRect();
+      const frac = clamp((e.clientY - trDrag.startY) / (r.height * 0.62), 0, 1);
+      setHandle(frac);
+      // 핸들 하단이 빨간 선(68%)을 넘는 순간 격발
+      if (!trDrag.fired && frac >= 0.92) {
+        trDrag.fired = true;
+        if (navigator.vibrate) navigator.vibrate(30);
+        fire();
+      }
+    });
+    const trEnd = e => {
+      if (!trDrag || (e && e.pointerId !== trDrag.id)) return;
+      trDrag = null;
+      th.classList.remove('armed');
+      setHandle(0);
+    };
+    tr.addEventListener('pointerup', trEnd);
+    tr.addEventListener('pointercancel', trEnd);
+
+    // 탄도 탭: 고각/윈디지/배율 ± (홀드 반복)
+    let balTimer = null;
+    const balAct = k => {
+      switch (k) {
+        case 'elev+': S.dial.elev++; playClick(); break;
+        case 'elev-': S.dial.elev--; playClick(); break;
+        case 'wind+': S.dial.wind++; playClick(); break;
+        case 'wind-': S.dial.wind--; playClick(); break;
+        case 'zoom+': S.mag = clamp(S.mag + 1, S.magMin || 5, 25); break;
+        case 'zoom-': S.mag = clamp(S.mag - 1, S.magMin || 5, 25); break;
+      }
+      S.lastHudUpdate = 0;
+    };
+    document.querySelectorAll('.bal-btn').forEach(b => {
+      const k = b.dataset.bal;
+      b.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (S.phase !== 'play') return;
+        balAct(k);
+        clearInterval(balTimer);
+        balTimer = setInterval(() => balAct(k), 140);
+      });
+      const end = () => { clearInterval(balTimer); balTimer = null; };
+      b.addEventListener('pointerup', end);
+      b.addEventListener('pointercancel', end);
+      b.addEventListener('pointerleave', end);
+      b.addEventListener('contextmenu', e => e.preventDefault());
+    });
+  }
+
+  /* 측거표: 거리별 표적 부위 mil 크기 */
+  function buildSizes() {
+    const dists = S.map.anchors.map(a => a.dist);
+    const lo = Math.max(100, Math.floor(Math.min(...dists) / 100) * 100 - 100);
+    const hi = Math.ceil(Math.max(...dists) / 100) * 100 + 100;
+    const step = hi - lo > 1200 ? 200 : 100;
+    const milWH = (wcm, hcm, d) => `${(wcm * 10 / d).toFixed(1)}×${(hcm * 10 / d).toFixed(1)}`;
+    let html = `<table><tr><th>거리 m</th><th>전신<br>55×180cm</th><th>상체<br>55×90cm</th><th>머리<br>24×24cm</th></tr>`;
+    for (let d = lo; d <= hi; d += step) {
+      html += `<tr><td>${d}</td><td>${milWH(55, 180, d)}</td><td>${milWH(55, 90, d)}</td><td>${milWH(24, 24, d)}</td></tr>`;
+    }
+    html += `</table><div class="note2">단위: mil (mrad). 거리 = 실제 크기(m) ÷ 측정 mil × 1000 — 레티클로 표적을 재서 거리를 역산하라.</div>`;
+    $('sizes-table').innerHTML = html;
   }
 
   /* ---------------- 메인 루프 ---------------- */
@@ -2220,5 +2494,9 @@
   }
   window.__lm = S;
   buildMenu();
+  buildClassroom();
+  syncSettingsUI();
+  updateTouchBar();
+  window.addEventListener('resize', updateTouchBar);
   loop();
 })();
