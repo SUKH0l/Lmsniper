@@ -52,6 +52,7 @@
     magMin: 5,
     stageScale: 1,
     assistHL: true,     // DOPE 거리 하이라이트 토글
+    dopeOpen: true,     // 탄도표 펼침 (데스크톱 전용 — 모바일은 항상 펼침)
     muted: false,
     navTab: 'simulator',
     bigMsg: null,       // {text, color, until} — HIT/MISS 대형 표시
@@ -2808,7 +2809,7 @@
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') S.holdingBreath = false;
   });
 
-  /* ---------------- 상단 토글 스위치 ---------------- */
+  /* ---------------- 토글 스위치 (우하단 스택) ---------------- */
   $('tgl-hl').addEventListener('change', e => {
     S.assistHL = e.target.checked;
     S._dopeHint = null; // 다음 HUD 갱신 때 재렌더
@@ -2843,7 +2844,27 @@
     document.body.classList.toggle('has-nav', navShow);
     $('tgl-look-row').classList.toggle('hidden', !!coarse);
     const slr = $('set-look-row'); if (slr) slr.classList.toggle('hidden', !!coarse);
+    applyDopePanel();
   }
+
+  /* ── 탄도표 접기/펴기 (데스크톱 전용) ──
+   * 모바일은 화면이 좁아 표 배치 자체가 다르므로 버튼을 숨기고 항상 펼친 상태로 둔다. */
+  function applyDopePanel() {
+    const coarse = isCoarse();
+    const open = coarse || S.dopeOpen;
+    $('hud-dope').classList.toggle('collapsed', !open);
+    const btn = $('dope-tgl');
+    if (!btn) return;
+    btn.classList.toggle('hidden', !!coarse);
+    btn.textContent = open ? '−' : '+';
+    btn.title = open ? '탄도표 접기' : '탄도표 펴기';
+  }
+  $('dope-tgl').addEventListener('click', () => {
+    S.dopeOpen = !S.dopeOpen;
+    applyDopePanel();
+    if (S.dopeOpen) renderBallistic();   // 접힌 동안 놓친 갱신을 다시 그린다
+    saveSettings();
+  });
 
   /* ── 하단 내비 탭 전환 ── */
   function switchTab(tab) {
@@ -2914,7 +2935,7 @@
     try {
       localStorage.setItem(LS_KEY, JSON.stringify({
         retStyle: S.retStyle, reticle: S.reticle, assistHL: S.assistHL,
-        controlMode: S.controlMode, muted: S.muted,
+        controlMode: S.controlMode, muted: S.muted, dopeOpen: S.dopeOpen,
       }));
     } catch (e) { /* 저장 불가 — 이번 세션에만 적용된다 */ }
   }
@@ -2928,6 +2949,7 @@
     if (typeof o.assistHL === 'boolean') S.assistHL = o.assistHL;
     if (o.controlMode === 'drag' || o.controlMode === 'look') S.controlMode = o.controlMode;
     if (typeof o.muted === 'boolean') S.muted = o.muted;
+    if (typeof o.dopeOpen === 'boolean') S.dopeOpen = o.dopeOpen;
   }
 
   /* ── 레티클 색상 세그먼트 (설정 + 상단 HUD 공용) ── */

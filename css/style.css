@@ -104,8 +104,27 @@ html, body {
 #wind-digital .dim { font-size: 11px; color: var(--dim); font-weight: 400; }
 #hud-dope { top: 14px; right: 14px; max-width: 470px; }
 #dope-table { max-height: 420px; overflow: auto; }
+/* 제목줄 오른쪽 끝의 접기/펴기 버튼 (데스크톱 전용 — 모바일에선 JS가 숨긴다) */
+#hud-dope h4 { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#dope-tgl {
+  pointer-events: auto; cursor: pointer;
+  background: #16211a; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 4px;
+  width: 20px; height: 18px; margin-right: 2px;
+  font: inherit; font-size: 13px; line-height: 1;
+  letter-spacing: 0; display: flex; align-items: center; justify-content: center;
+}
+#dope-tgl:hover { border-color: var(--accent); color: #eaf6ec; }
+#hud-dope.collapsed { max-width: none; }
+#hud-dope.collapsed #dope-table { display: none; }
+#hud-dope.collapsed h4 { margin-bottom: 0; }
 #hud-weapon { bottom: 14px; left: 14px; }
-#hud-body { bottom: 14px; right: 14px; min-width: 230px; }
+/* 우하단 스택: 토글 스위치가 터렛/신체 패널 바로 위에 올라간다 */
+#hud-br {
+  bottom: 14px; right: 14px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+}
+#hud-body { min-width: 230px; }
 #hud-log {
   bottom: 14px; left: 50%; transform: translateX(-50%);
   text-align: center; color: #d8ecd9; text-shadow: 0 1px 3px #000;
@@ -279,10 +298,10 @@ html, body {
   .tc-btn.hold { width: 60px; height: 60px; font-size: 10.5px; }
 }
 
-/* ===== 상단 토글 스위치 ===== */
+/* ===== 토글 스위치 (우하단 스택) ===== */
 #hud-toggles {
-  top: 10px; right: 348px; pointer-events: auto;
-  display: flex; gap: 14px; padding: 8px 12px;
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 14px; padding: 8px 12px;
 }
 #hud-toggles .tgl {
   display: flex; align-items: center; gap: 6px;
@@ -431,7 +450,7 @@ body.has-nav #mnav ~ .overlay { padding-bottom: 64px; }
 .seg-btn:hover { border-color: var(--dim); }
 .seg-btn.on { border-color: var(--accent); background: rgba(143,209,79,0.12); color: #eaf6ec; }
 .seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-/* 상단 HUD: 레티클 시인성 순환 버튼 (데스크톱 플레이 중 전환용) */
+/* HUD 토글바: 레티클 시인성 순환 버튼 (데스크톱 플레이 중 전환용) */
 .tgl-cycle {
   background: #16211a; color: var(--txt);
   border: 1px solid var(--line); border-radius: 6px;

@@ -66,24 +66,24 @@
     <canvas id="wind-history" width="168" height="34"></canvas>
   </div>
 
-  <!-- 상단 토글: 거리 하이라이트 / 조준 방식 -->
-  <div id="hud-toggles" class="hud panel">
-    <label class="tgl"><input type="checkbox" id="tgl-hl" checked><span>거리 하이라이트</span></label>
-    <label class="tgl" id="tgl-look-row"><input type="checkbox" id="tgl-look"><span>마우스룩 조준</span></label>
-    <button class="tgl-cycle" id="hud-retcycle" title="레티클 색상 (V)"></button>
-  </div>
-
   <!-- 우상단: 탄도표 (거리별 낙차/편류 제원) -->
   <div id="hud-dope" class="hud panel">
-    <h4>탄도표 [mrad]</h4>
+    <h4>탄도표 [mrad]<button type="button" id="dope-tgl" title="탄도표 접기/펴기">−</button></h4>
     <div id="dope-table" class="bal-tbl"></div>
   </div>
 
   <!-- 좌하단: 총기/탄약/탄창 -->
   <div id="hud-weapon" class="hud panel"></div>
 
-  <!-- 우하단: 터렛 / 신체 상태 -->
-  <div id="hud-body" class="hud panel"></div>
+  <!-- 우하단 스택: 토글 스위치 위, 터렛/신체 아래 -->
+  <div id="hud-br" class="hud">
+    <div id="hud-toggles" class="panel">
+      <label class="tgl"><input type="checkbox" id="tgl-hl" checked><span>거리 하이라이트</span></label>
+      <label class="tgl" id="tgl-look-row"><input type="checkbox" id="tgl-look"><span>마우스룩 조준</span></label>
+      <button class="tgl-cycle" id="hud-retcycle" title="레티클 색상 (V)"></button>
+    </div>
+    <div id="hud-body" class="panel"></div>
+  </div>
 
   <!-- 샷 로그 -->
   <div id="hud-log" class="hud"></div>
