@@ -264,6 +264,7 @@ html, body {
   .v-item.ammo-row { gap: 12px; padding: 12px; }
   .ammo-thumb { width: 84px; height: 84px; }
   .ret-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+  .seg-btn { min-width: 74px; min-height: 44px; font-size: 12px; }  /* 터치 타깃 44px */
 
   /* 터치 바: 좌측 클러스터는 발사 버튼 영역을 침범하지 않게, 우측은 세로 스택 */
   #touch-bar .tc-left { left: 8px; right: 118px; bottom: 10px; }
@@ -417,6 +418,23 @@ body.has-nav #mnav ~ .overlay { padding-bottom: 64px; }
 }
 .set-row input[type="checkbox"]:checked { background: rgba(143,209,79,0.35); }
 .set-row input[type="checkbox"]:checked::after { left: 22px; background: var(--accent); }
+
+/* ===== 세그먼트 선택 (레티클 시인성) ===== */
+.set-choice { flex-direction: column; align-items: stretch; gap: 10px; cursor: default; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg-btn {
+  flex: 1 1 auto; min-width: 84px; min-height: 40px; padding: 7px 10px;
+  background: #0d120e; border: 1px solid var(--line); border-radius: 8px;
+  color: var(--dim); font-size: 12.5px; font-family: inherit; cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.seg-btn:hover { border-color: var(--dim); }
+.seg-btn.on { border-color: var(--accent); background: rgba(143,209,79,0.12); color: #eaf6ec; }
+.seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 상단 HUD 미러 (데스크톱 플레이 중 전환용) */
+.seg-btn.sm { min-width: 0; min-height: 0; padding: 3px 7px; font-size: 10.5px; border-radius: 5px; }
+#hud-toggles .seg { gap: 3px; max-width: 430px; }
+#hud-toggles .tgl { gap: 6px; }
 
 /* ===== 세로형 컨트롤 패널 ===== */
 #ctl-panel {

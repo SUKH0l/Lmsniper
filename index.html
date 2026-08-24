@@ -70,6 +70,7 @@
   <div id="hud-toggles" class="hud panel">
     <label class="tgl"><input type="checkbox" id="tgl-hl" checked><span>거리 하이라이트</span></label>
     <label class="tgl" id="tgl-look-row"><input type="checkbox" id="tgl-look"><span>마우스룩 조준</span></label>
+    <div class="tgl"><span>레티클</span><div class="seg seg-sm" id="hud-retstyle"></div></div>
   </div>
 
   <!-- 우상단: 탄도표 (거리별 낙차/편류 제원) -->
@@ -203,6 +204,8 @@
         <input type="checkbox" id="set-look"></label>
       <label class="set-row"><span>사운드<br><small>총성·터렛 클릭·바람 소리</small></span>
         <input type="checkbox" id="set-sound" checked></label>
+      <div class="set-row set-choice"><span>레티클 시인성<br><small>배경에 묻힐 때 선 대비를 높인다 (플레이 중 V 키로도 전환)</small></span>
+        <div class="seg" id="set-retstyle"></div></div>
     </div>
     <p class="menu-refs" style="text-align:left">물리 모델 참고: G. Klimi <i>Elements of Exterior Ballistics</i> ·
       Cranz &amp; Becker <i>Handbook of Ballistics Vol.1</i> ·

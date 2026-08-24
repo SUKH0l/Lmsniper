@@ -27,6 +27,7 @@
     dial: { elev: 0, wind: 0 },     // 클릭 수 (1클릭 = 0.1 mil)
     mag: 12,
     reticle: 'mildot',              // 선택 레티클 (총기 선택 화면에서 변경)
+    retStyle: 'outline',            // 레티클 시인성 스타일 (설정 / V 키)
     pointerLocked: false,
     controlMode: 'drag',   // 'drag' | 'look' — C 키로 토글
     magazine: 0, canFireAt: 0,
@@ -64,6 +65,8 @@
   const now = () => performance.now() / 1000;
   const fmt = (v, d = 1) => v.toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d });
   const TAU = Math.PI * 2;
+  // 레티클 완성 레이어 캐시 — resize()가 부팅 즉시 비우므로 여기서 선언한다
+  const retLayers = new Map();   // key → 캔버스 (삽입 순서로 오래된 것부터 폐기)
 
   function noise1(t, seed = 0) {
     return (Math.sin(t * 1.7 + seed * 12.9) * 0.5 +
@@ -1056,6 +1059,7 @@
       }
     }
     S.stageScale = sc;
+    retLayers.clear();   // 두께가 stageScale에 연동되므로 레티클 레이어를 다시 굽는다
   }
   window.addEventListener('resize', resize);
   resize();
@@ -1641,9 +1645,10 @@
     renderWorld(ctx, W, H, ppm, camYaw, camPitch, { mirage: true });
     // 비네팅
     const vig = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R);
+    // 가장자리를 과하게 어둡게 하면 그 위의 레티클 눈금이 먼저 사라진다 — 완화
     vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(0.85, 'rgba(0,0,0,0.25)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.6)');
+    vig.addColorStop(0.85, 'rgba(0,0,0,0.18)');
+    vig.addColorStop(1, 'rgba(0,0,0,0.45)');
     ctx.fillStyle = vig;
     ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
     // 렌즈 글레어
@@ -1737,14 +1742,124 @@
   const reticleName = () => reticleDef().name;
   const reticleUnit = () => reticleDef().unit;
 
-  function drawReticle(cx, cy, R, ppm, type = S.reticle) {
+  /* ── 레티클 시인성 스타일 ──
+   * 검정 단색 레티클은 헛간 그늘·숲처럼 어두운 배경에서 그대로 소멸한다.
+   * 마스크를 만들어 테두리(헤일로)·굵기·조명색을 합성해 대비를 확보한다. */
+  const RET_STYLES = [
+    { id: 'plain',       name: '기본',        lw: 1 },
+    { id: 'outline',     name: '흰 테두리',   lw: 1,   halo: 'rgba(252,255,252,0.95)' },
+    { id: 'bold',        name: '굵게',        lw: 2.2 },
+    { id: 'boldOutline', name: '굵게+테두리', lw: 2.2, halo: 'rgba(252,255,252,0.95)' },
+    { id: 'glow',        name: '흰 글로우',   lw: 1,   glow: 'rgba(255,255,255,0.95)' },
+    { id: 'red',         name: '적색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#ff2e1f' },
+    { id: 'redCenter',   name: '중앙 조명',   lw: 1.3, halo: 'rgba(252,255,252,0.95)', center: '#ff2e1f' },
+    { id: 'green',       name: '녹색 조명',   lw: 1.3, halo: 'rgba(0,0,0,0.85)', core: '#39ff5e' },
+  ];
+  const RET_INK = 'rgba(8,10,8,0.95)';        // 기본 잉크 (현행과 동일)
+  const retStyleDef = id =>
+    RET_STYLES.find(s => s.id === (id ?? S.retStyle)) || RET_STYLES[0];
+
+  /* 가는 선 두께: 화면에 '렌더된 뒤'의 CSS 픽셀 두께가 기기와 무관하게
+   * 일정하도록 stageScale로 역보정한다. 논리 캔버스(1440×900)가 모바일
+   * 세로에선 ≈0.43배로 축소되고 데스크톱 1080p에선 1.2배로 확대되기 때문에,
+   * 보정 없이는 같은 1px이 0.43 CSS px과 1.2 CSS px으로 3배 가까이 벌어진다. */
+  const TARGET_CSS_PX = 1.5;
+  const RET_CAP_MIL = 0.14;   // 저배율에서 선이 눈금 간격을 잡아먹지 않도록 하는 상한
+  function fineWidth(ppm, lw = 1, w = {}) {
+    const sc = clamp(w.scale ?? S.stageScale ?? 1, 0.4, 1.3);
+    const base = Math.max(TARGET_CSS_PX / sc, ppm * 0.02) * lw;
+    // 상한은 각도 기준 — 배율이 낮아 1 mil이 좁을 때만 걸린다.
+    return w.noCap ? base : Math.min(base, Math.max(1, ppm * RET_CAP_MIL * lw));
+  }
+
+  /* ── 레티클 레이어 캐시 ──
+   * 기하는 (type, ppm, R, 두께)에만 의존하고 조준에 따라 움직이지 않으므로
+   * 매 프레임 다시 그릴 이유가 없다. 테두리·글로우까지 전부 구운 완성 레이어를
+   * 오프스크린에 만들어 두고 프레임당 blit 1회만 한다 (drawOuter의 outCv 패턴).
+   * 그 결과 합성이 아무리 복잡해도 프레임 비용은 현행보다 오히려 낮다. */
+  const RET_PAD = 22;              // 헤일로·글로우가 잘리지 않도록 둘레 여유
+  const HALO_OFF = [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]];
+  const RET_CACHE_MAX = 3;
+
+  function buildReticleLayer(R, ppm, type, style, w) {
+    const st = retStyleDef(style);
+    const side = 2 * Math.ceil(R + RET_PAD);   // 짝수 → blit 오프셋이 정수라 리샘플링 없음
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = side;
+    const c = side / 2;
+    const prev = ctx; ctx = cv.getContext('2d');
     ctx.save();
-    ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.clip();
-    const ink = 'rgba(8,10,8,0.95)';
+    ctx.beginPath(); ctx.arc(c, c, R, 0, TAU); ctx.clip();   // 클리핑은 여기서 한 번만
+
+    const paint = (color, ox = 0, oy = 0) =>
+      drawReticlePaths(c + ox, c + oy, R, ppm, type, st.lw, color, w);
+    const h = fineWidth(ppm, st.lw, w) * 0.85;               // 헤일로 오프셋
+    const sc = clamp(w.scale ?? S.stageScale ?? 1, 0.4, 1.25);
+
+    // 1) 테두리(헤일로) — 8방향 오프셋. shadowBlur보다 선명하다.
+    if (st.halo) for (const [ox, oy] of HALO_OFF) paint(st.halo, ox * h, oy * h);
+    // 2) 부드러운 광훈 — 그림자를 켠 채 두 번 겹쳐 광량을 축적
+    if (st.glow) {
+      ctx.save();
+      ctx.shadowColor = st.glow;
+      ctx.shadowBlur = clamp(7 / sc, 3, 18);
+      paint(RET_INK); paint(RET_INK);
+      ctx.restore();
+    }
+    // 3) 코어
+    paint(st.core || RET_INK);
+    // 4) 중앙 조명 존 — 실제 조명 스코프처럼 가운데만 발광
+    if (st.center) {
+      const rc = clamp(3.5 * ppm, R * 0.10, R * 0.50);
+      ctx.save();
+      ctx.beginPath(); ctx.arc(c, c, rc, 0, TAU); ctx.clip();
+      ctx.clearRect(c - rc - 2, c - rc - 2, rc * 2 + 4, rc * 2 + 4); // 클립 안에서만 지워진다
+      for (const [ox, oy] of HALO_OFF) paint('rgba(4,6,4,0.8)', ox * h, oy * h);
+      ctx.save();
+      ctx.shadowColor = st.center; ctx.shadowBlur = clamp(4 / sc, 2, 10);
+      paint(st.center);
+      ctx.restore();
+      paint(st.center);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx = prev;
+    return cv;
+  }
+
+  /* 레티클 렌더 — 캐시된 완성 레이어를 blit.
+   * opts.cache === false 면 캐시를 건너뛴다 (미리보기가 메인 캐시를 밀어내지 않도록).
+   * opts.scale 로 stageScale 보정을 무시할 수 있다 (CSS 축소가 없는 미리보기 캔버스). */
+  function drawReticle(cx, cy, R, ppm, type = S.reticle, style, opts = {}) {
+    const st = retStyleDef(style);
+    const w = { scale: opts.scale, noCap: opts.noCap };
+    let lay;
+    if (opts.cache === false) {
+      lay = buildReticleLayer(R, ppm, type, st.id, w);
+    } else {
+      const sc = opts.scale ?? S.stageScale ?? 1;
+      const key = `${type}|${st.id}|${ppm.toFixed(1)}|${R.toFixed(1)}|${sc.toFixed(2)}`;
+      lay = retLayers.get(key);
+      if (!lay) {
+        lay = buildReticleLayer(R, ppm, type, st.id, w);
+        retLayers.set(key, lay);
+        if (retLayers.size > RET_CACHE_MAX) retLayers.delete(retLayers.keys().next().value);
+      }
+    }
+    ctx.drawImage(lay, Math.round(cx - lay.width / 2), Math.round(cy - lay.height / 2));
+  }
+
+  /* 레티클 경로만 그린다 — 색(inkColor)과 가는 선 두께 배수(lw)는 호출자가 지정.
+   * 시인성 스타일 합성은 drawReticle()이 담당한다. */
+  function drawReticlePaths(cx, cy, R, ppm, type, lw, inkColor, w) {
+    ctx.save();
+    // 원형 클리핑은 호출자가 한 번만 건다 — 헤일로를 오프셋으로 그릴 때
+    // 클립까지 함께 밀리면 가장자리가 울퉁불퉁해지기 때문이다.
+    const ink = inkColor;
     ctx.strokeStyle = ink; ctx.fillStyle = ink;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = `${Math.max(9, ppm * 0.26)}px sans-serif`;
-    const fine = Math.max(1, ppm * 0.02);
+    const fine = fineWidth(ppm, lw, w);
 
     const cross = () => {
       ctx.lineWidth = fine;
@@ -1817,7 +1932,7 @@
           ctx.stroke();
         }
         const taper = (dx, dy) => {
-          const w0 = 0.55 * ppm, w1 = Math.max(1.5, 0.09 * ppm);
+          const w0 = 0.55 * ppm, w1 = Math.max(fine * 1.2, 0.09 * ppm);
           const x0 = cx + dx * R, y0 = cy + dy * R;
           const x1 = cx + dx * Math.min(R * 0.9, 3 * ppm), y1 = cy + dy * Math.min(R * 0.9, 3 * ppm);
           const px = -dy, py = dx;
@@ -1864,15 +1979,15 @@
           if (y > cy + R * 0.92) break;
           const hw = (0.6 + d * 0.28) * ppm;
           ctx.beginPath(); ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); ctx.stroke();
-          dot(cx - hw, y, Math.max(1.2, 0.05 * ppm));
-          dot(cx + hw, y, Math.max(1.2, 0.05 * ppm));
+          dot(cx - hw, y, Math.max(fine * 0.9, 0.05 * ppm));
+          dot(cx + hw, y, Math.max(fine * 0.9, 0.05 * ppm));
           if (ppm > 20) ctx.fillText(d, cx + hw + 0.45 * ppm, y);
         }
         posts(9, 0.28);
         break;
       }
       case 'pso': { // PSO-1: 슈브론 조준점 + 10-mil 스케일 + 측거 곡선
-        ctx.lineWidth = Math.max(1.4, ppm * 0.06);
+        ctx.lineWidth = Math.max(fine * 1.7, ppm * 0.06);
         const chev = (y, s2) => {
           ctx.beginPath();
           ctx.moveTo(cx - s2, y + s2 * 1.25); ctx.lineTo(cx, y); ctx.lineTo(cx + s2, y + s2 * 1.25);
@@ -1925,7 +2040,7 @@
       }
       default: { // mil-dot
         cross();
-        const dr = Math.max(1.4, ppm * 0.1);
+        const dr = Math.max(fine * 1.4, ppm * 0.1);
         for (let m = 1; m <= 4; m++) for (const s of [-1, 1]) {
           dot(cx + s * m * ppm, cy, dr);
           dot(cx, cy + s * m * ppm, dr);
@@ -1937,13 +2052,22 @@
     ctx.restore();
   }
 
-  /* 레티클 미리보기 (총기 선택 화면) — 밝은 배경에 ±8 mil 시야 */
-  function drawReticlePreview(cv, type) {
+  /* 레티클 미리보기 (총기 선택 화면) — 밝은 배경에 ±8 mil 시야.
+   * CSS 축소가 없는 캔버스이므로 stageScale 보정을 끄고(scale:1),
+   * 메인 스코프의 레이어 캐시를 오염시키지 않도록 캐시를 건너뛴다. */
+  function drawReticlePreview(cv, type, style = S.retStyle) {
     const c = cv.getContext('2d');
-    c.fillStyle = '#e9ece9';
+    // 밝은 배경에서는 흰 테두리가, 어두운 배경에서는 검은 코어가 안 보인다.
+    // 두 경우를 한 카드에 같이 담아야 스타일 차이가 드러난다.
+    const g = c.createLinearGradient(0, 0, cv.width, cv.height);
+    g.addColorStop(0, '#e9ece9'); g.addColorStop(0.52, '#9aa398'); g.addColorStop(1, '#1b221a');
+    c.fillStyle = g;
     c.fillRect(0, 0, cv.width, cv.height);
     const prev = ctx; ctx = c;
-    drawReticle(cv.width / 2, cv.height / 2, cv.width * 0.52, cv.width / 16, type);
+    // scale:1 — 카드 캔버스는 CSS 축소가 없다. noCap — ppm이 6이라 각도 상한을
+    // 걸면 모든 스타일이 같은 두께로 뭉개져 비교가 불가능해진다.
+    drawReticle(cv.width / 2, cv.height / 2, cv.width * 0.52, cv.width / 16, type,
+      style, { cache: false, scale: 1, noCap: true });
     ctx = prev;
   }
 
@@ -2474,8 +2598,8 @@
   }
   function updateHelpText() {
     $('hud-help').innerHTML = S.controlMode === 'drag'
-      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석'
-      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석';
+      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 시인성 · M: 메뉴 · A: 명중률 분석'
+      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 시인성 · M: 메뉴 · A: 명중률 분석';
     const lk = $('tgl-look'); if (lk) lk.checked = S.controlMode === 'look';
   }
 
@@ -2618,6 +2742,11 @@
       case 'KeyM': backToMenu(); break;
       case 'KeyA': runAnalysis(); break;
       case 'KeyC': setControlMode(S.controlMode === 'drag' ? 'look' : 'drag'); break;
+      case 'KeyV': { // 레티클 시인성 순환 (데스크톱은 플레이 중 설정에 못 들어간다)
+        const i = RET_STYLES.findIndex(v => v.id === S.retStyle);
+        setRetStyle(RET_STYLES[(i + 1) % RET_STYLES.length].id, true);
+        break;
+      }
     }
     S.lastHudUpdate = 0;
   });
@@ -2721,11 +2850,36 @@
   $('lesson-back2').onclick = backToClassroom;
 
   /* ── 설정 ── */
+  /* ── 레티클 시인성 세그먼트 (설정 + 상단 HUD 공용) ── */
+  function buildVisSeg(host, small) {
+    if (!host) return;
+    host.innerHTML = RET_STYLES.map(v =>
+      `<button type="button" class="seg-btn${small ? ' sm' : ''}" data-v="${v.id}">${v.name}</button>`).join('');
+  }
+  function setRetStyle(id, announce) {
+    if (!RET_STYLES.some(v => v.id === id)) return;
+    S.retStyle = id;
+    retLayers.clear();                    // 스타일이 바뀌면 구워둔 레이어를 버린다
+    syncSettingsUI();
+    // 총기 상세가 열려 있으면 카드 미리보기도 새 스타일로 다시 그린다
+    document.querySelectorAll('#ret-grid .ret-card').forEach(c => {
+      const cv = c.querySelector('canvas');
+      if (cv) drawReticlePreview(cv, c.dataset.ret);
+    });
+    if (announce) setMsg(`레티클 시인성: ${retStyleDef(id).name}`, 2);
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('.seg-btn');
+    if (b) setRetStyle(b.dataset.v);
+  });
+
   function syncSettingsUI() {
     $('set-hl').checked = S.assistHL;
     $('tgl-hl').checked = S.assistHL;
     const sl = $('set-look'); if (sl) sl.checked = S.controlMode === 'look';
     $('set-sound').checked = !S.muted;
+    document.querySelectorAll('.seg-btn').forEach(b =>
+      b.classList.toggle('on', b.dataset.v === S.retStyle));
   }
   $('set-hl').addEventListener('change', e => {
     S.assistHL = e.target.checked; S._dopeHint = null; syncSettingsUI();
@@ -2889,6 +3043,8 @@
   buildMissionMenu();
   buildMenu();
   buildClassroom();
+  buildVisSeg($('set-retstyle'));
+  buildVisSeg($('hud-retstyle'), true);
   syncSettingsUI();
   updateTouchBar();
   window.addEventListener('resize', updateTouchBar);
