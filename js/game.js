@@ -2007,65 +2007,103 @@
         posts(62 * 0.2908882, 0.12);
         break;
       }
-      case 'dmr': { // DMR 사다리: 수평 해시 + 하방 BDC 러그(윈드 도트)
-        cross();
-        hashCross(ppm, 8, 2);
-        microTicks(ppm, 8);
+      case 'dmr': { // DMR8i: 수평 해시 + 하방 드롭 라인 + 스타디아 측거 바 (1 m 표적)
+        const lim = R * 0.92;
+        // 수평 본선 + 하방 수직선 — 상단 수직선이 없는 것이 특징
         ctx.lineWidth = fine;
-        for (let d = 1; d <= 8; d++) {
-          const y = cy + d * ppm;
-          if (y > cy + R * 0.92) break;
-          const hw = (0.6 + d * 0.28) * ppm;
-          ctx.beginPath(); ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y); ctx.stroke();
-          dot(cx - hw, y, Math.max(1.2, 0.05 * ppm));
-          dot(cx + hw, y, Math.max(1.2, 0.05 * ppm));
-          if (fits(ppm)) label(d, cx + hw + 0.45 * ppm, y);
-        }
-        posts(9, 0.28);
-        break;
-      }
-      case 'pso': { // PSO-1: 슈브론 조준점 + 10-mil 스케일 + 측거 곡선
-        ctx.lineWidth = Math.max(1.4, ppm * 0.06);
-        const chev = (y, s2) => {
-          ctx.beginPath();
-          ctx.moveTo(cx - s2, y + s2 * 1.25); ctx.lineTo(cx, y); ctx.lineTo(cx + s2, y + s2 * 1.25);
-          ctx.stroke();
-        };
-        chev(cy, ppm * 0.38);
-        chev(cy + 1.9 * ppm, ppm * 0.27);
-        chev(cy + 3.4 * ppm, ppm * 0.27);
-        chev(cy + 4.6 * ppm, ppm * 0.27);
-        // 수평 1-mil 스케일 (±10) + 상단 세선
-        ctx.lineWidth = fine;
-        ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy - 0.8 * ppm); ctx.stroke();
-        for (let m = 1; m <= 10; m++) {
-          const len = (m % 5 === 0 ? 0.22 : 0.12) * ppm;
+        ctx.beginPath();
+        ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+        ctx.moveTo(cx, cy); ctx.lineTo(cx, cy + R);
+        ctx.stroke();
+        // 0.5 mil 짧은 / 1 mil 중간 / 5 mil 긴 해시 — 수평 ±15 mil, 수직 하방 10 mil
+        ctx.beginPath();
+        for (let t = 1; t <= 30; t++) {
+          const off = t * 0.5 * ppm;
+          if (off >= lim) break;
+          const len = (t % 10 === 0 ? 0.30 : t % 2 === 0 ? 0.18 : 0.10) * ppm;
           for (const s of [-1, 1]) {
-            const x = cx + s * m * ppm;
-            if (Math.abs(x - cx) >= R * 0.92) continue;
-            ctx.beginPath(); ctx.moveTo(x, cy - len); ctx.lineTo(x, cy + len); ctx.stroke();
+            ctx.moveTo(cx + s * off, cy - len); ctx.lineTo(cx + s * off, cy + len);
+          }
+          if (t <= 20) {
+            ctx.moveTo(cx - len, cy + off); ctx.lineTo(cx + len, cy + off);
           }
         }
-        if (fits(ppm)) { label('10', cx - 10 * ppm, cy - 0.5 * ppm); label('10', cx + 10 * ppm, cy - 0.5 * ppm); }
+        ctx.stroke();
+        microTicks(ppm, 15, 'h');
+        dot(cx, cy, Math.max(1.2, 0.06 * ppm));   // 중앙 조준점 (조명 도트)
+        // 스타디아 측거 바 — 기준선~바 높이 = 10/n mil (1 m 표적, 숫자 n = ×100 m)
+        const by = cy + 7.2 * ppm;
+        if (by < cy + lim) {
+          ctx.lineWidth = fine;
+          ctx.beginPath(); ctx.moveTo(cx - 5.6 * ppm, by); ctx.lineTo(cx + 5.2 * ppm, by); ctx.stroke();
+          ctx.font = `700 ${Math.max(9 / tsc, ppm * 0.2)}px sans-serif`;
+          for (const [n, bx] of [[8, -5.2], [7, -3.9], [6, -2.6], [5, -1.3], [4, 1.3], [3, 2.7], [2, 4.3]]) {
+            const x = cx + bx * ppm, y = by - (10 / n) * ppm;
+            ctx.beginPath(); ctx.moveTo(x - 0.4 * ppm, y); ctx.lineTo(x + 0.4 * ppm, y); ctx.stroke();
+            if (fits(ppm * 0.9)) label(n, x, y + 0.42 * ppm);
+          }
+          ctx.font = `700 ${fontPx}px sans-serif`;
+        }
+        posts(15, 0.4, [[-1, 0], [1, 0]]);   // 좌/우 포스트
+        posts(12, 0.4, [[0, 1]]);            // 하단 포스트 (상단 포스트 없음)
+        break;
+      }
+      case 'pso': { // PSO-1 (SVD식): 윗눈금 1-mil 스케일 + 슈브론 조준점 + 측거 곡선
+        const lim = R * 0.92;
+        // 수평 본선 — 좌/우 포스트 사이
+        ctx.lineWidth = fine;
+        ctx.beginPath();
+        ctx.moveTo(cx - Math.min(lim, 10.5 * ppm), cy);
+        ctx.lineTo(cx + Math.min(lim, 10.5 * ppm), cy);
+        ctx.stroke();
+        // 1-mil 눈금 — 본선 위쪽으로만 솟는 사각 이빨
+        ctx.lineWidth = Math.max(1.5, ppm * 0.12);
+        ctx.beginPath();
+        for (let m = 1; m <= 10; m++) for (const s of [-1, 1]) {
+          const x = cx + s * m * ppm;
+          if (Math.abs(x - cx) >= lim) continue;
+          ctx.moveTo(x, cy); ctx.lineTo(x, cy - 0.28 * ppm);
+        }
+        ctx.stroke();
+        if (fits(ppm) && 10 * ppm < lim) {
+          label('10', cx - 10 * ppm, cy + 0.6 * ppm);
+          label('10', cx + 10 * ppm, cy + 0.6 * ppm);
+        }
         microTicks(ppm, 10, 'h');   // 수평 스케일만 — 수직은 슈브론 존
+        // 슈브론 조준점 — 꼭짓점이 조준 중심
+        ctx.lineWidth = Math.max(1.4, ppm * 0.07);
+        ctx.beginPath();
+        ctx.moveTo(cx - 0.5 * ppm, cy + 0.9 * ppm);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx + 0.5 * ppm, cy + 0.9 * ppm);
+        ctx.stroke();
+        // 하방 수직 세선 (상단 수직선 없음)
+        ctx.lineWidth = fine;
+        ctx.beginPath(); ctx.moveTo(cx, cy + 1.3 * ppm); ctx.lineTo(cx, cy + lim); ctx.stroke();
         posts(10.6, 0.5, [[-1, 0], [1, 0]]);
-        // 스타디아 측거 곡선: 1.7 m 표적, 2~10 (×100 m)
+        // 스타디아 측거 곡선 (좌하단): 1.5 m 상단 곡선 + 0.5 m 하단 곡선, 숫자 = ×100 m
         const bx0 = cx - 8.6 * ppm, bx1 = cx - 1.6 * ppm, by = cy + 6.8 * ppm;
         if (by < cy + R * 0.95) {
           ctx.lineWidth = fine;
           ctx.beginPath(); ctx.moveTo(bx0, by); ctx.lineTo(bx1, by); ctx.stroke();
-          ctx.beginPath();
-          for (let n = 2; n <= 10; n += 0.5) {
-            const x = lerp(bx0, bx1, (n - 2) / 8);
-            const h = (17 / n) * ppm * 0.35; // 시각화 축소 스케일
-            n === 2 ? ctx.moveTo(x, by - h) : ctx.lineTo(x, by - h);
-          }
-          ctx.stroke();
+          const curve = h10 => {   // h10: 표적 높이 [dm] — 곡선 높이 ∝ h10/n
+            ctx.beginPath();
+            for (let n = 10; n >= 2; n -= 0.5) {
+              const x = lerp(bx0, bx1, (10 - n) / 8);
+              const h = (h10 / n) * ppm * 0.35; // 시각화 축소 스케일
+              n === 10 ? ctx.moveTo(x, by - h) : ctx.lineTo(x, by - h);
+            }
+            ctx.stroke();
+          };
+          curve(15); curve(5);
           if (fits(ppm * 0.9)) {
             ctx.font = `700 ${Math.max(9 / tsc, ppm * 0.2)}px sans-serif`;
-            for (const n of [2, 4, 6, 8, 10]) {
-              label(n, lerp(bx0, bx1, (n - 2) / 8), by + 0.35 * ppm);
+            for (const n of [10, 8, 6, 4, 2]) {
+              const x = lerp(bx0, bx1, (10 - n) / 8);
+              label(n, x, by - (15 / n) * ppm * 0.35 - 0.35 * ppm);
             }
+            label('1.5', bx1 + 0.6 * ppm, by - (15 / 2) * ppm * 0.35);
+            label('0.5', bx1 + 0.6 * ppm, by - (5 / 2) * ppm * 0.35);
             ctx.font = `700 ${fontPx}px sans-serif`;
           }
         }
