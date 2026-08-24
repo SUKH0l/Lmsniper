@@ -34,7 +34,7 @@
     /* 라운드제: 임무당 rounds회, 라운드당 shotsPerRound발 (기본 3발).
      * 탄환 소진 시 라운드 실패. 제한시간 없음. */
     roundsTotal: 5, roundIdx: 0, roundResults: [], roundShots: [], shotsPerRound: 3,
-    breathPhase: 0, o2: 100, holdingBreath: false, recovering: 0,
+    breathPhase: 0, o2: 100, holdingBreath: false, recovering: 0,  // holdingBreath: 토글식 (한 번 눌러 켜고 다시 눌러 끈다)
     heartRate: 70, heartPhase: 0,
     windNow: 0, windDirNow: 0, windNoiseT: 0,
     windMeas: 0, windDirMeas: 0,       // 풍속계 표시값 (센서 지연/오차)
@@ -56,7 +56,6 @@
     muted: false,
     navTab: 'simulator',
     bigMsg: null,       // {text, color, until} — HIT/MISS 대형 표시
-    fireHold: false,    // 발사 버튼 홀드(숨참기) 중
     _uiClick: false,
   };
 
@@ -450,6 +449,7 @@
     S.shots = []; S.puffs = [];
     S.score = 0; S.firedTotal = 0;
     S.o2 = 100; S.heartRate = 70; S.recovering = 0;
+    S.holdingBreath = false; syncBreathUi();
     S.activeShot = null; S.canFireAt = 0;
     S.spotterNoise = { wind: gauss() * 0.5, dir: gauss() * 0.5, elev: gauss() * 0.3 };
     S.windHist = [];
@@ -548,6 +548,7 @@
   }
   function backToMenu() {
     S.phase = 'menu';
+    S.holdingBreath = false; syncBreathUi();
     document.exitPointerLock && document.exitPointerLock();
     $('game').classList.add('hidden');
     $('analysis').classList.add('hidden');
@@ -821,12 +822,9 @@
       S.o2 = Math.max(0, S.o2 - dt * 14);
       if (S.o2 === 0) {
         S.recovering = 4; S.heartRate = 105;
-        if (S.fireHold) { // 숨을 더 못 참으면 숨참기 자동 해제
-          S.fireHold = false;
-          const b = $('btn-breath'); if (b) b.classList.remove('on');
-          const p = $('p-breath'); if (p) p.classList.remove('on');
-          setMsg('숨이 찼다 — 호흡 회복 중', 2);
-        }
+        // 숨을 더 못 참으면 토글을 자동으로 끈다
+        setBreathHold(false);
+        setMsg('숨이 찼다 — 호흡 회복 중', 2);
       }
     } else {
       S.o2 = Math.min(100, S.o2 + dt * (S.recovering > 0 ? 10 : 25));
@@ -834,7 +832,7 @@
     if (S.recovering > 0) S.recovering = Math.max(0, S.recovering - dt);
     S.heartRate = Math.max(70, S.heartRate - dt * 6);
 
-    const holdEff = (S.holdingBreath && S.o2 > 0 && S.recovering <= 0) ? 0.15 : 1;
+    const holdEff = breathActive() ? 0.15 : 1;
     const recovEff = S.recovering > 0 ? 2.2 : 1;
     const amp = 0.5 * S.rifle.swayFactor * holdEff * recovEff;
     const beat = Math.pow(Math.max(0, Math.sin(S.heartPhase)), 12) * 0.1667 * (S.heartRate / 70);
@@ -854,6 +852,38 @@
     if (t - S.lastHudUpdate > 0.15) { S.lastHudUpdate = t; updateHud(); }
     drawWindMeter();
     updateWindAmbience();
+  }
+
+  /* ---------------- 숨참기(토글) / 조준 감도 ---------------- */
+  /* 숨참기는 토글식이다 — 꾹 누르고 있을 필요 없이 한 번 켜고 다시 눌러 끈다.
+   * 켜져 있는 동안에는 흔들림이 줄고(holdEff), 조준 이동 감도도 함께 낮아져
+   * 미세 조정이 쉬워진다(BREATH_AIM_SENS). */
+  const BREATH_AIM_SENS = 0.4;
+
+  function breathActive() {
+    return S.holdingBreath && S.o2 > 0 && S.recovering <= 0;
+  }
+  function syncBreathUi() {
+    const on = S.holdingBreath;
+    const b = $('btn-breath'); if (b) b.classList.toggle('on', on);
+    const p = $('p-breath'); if (p) p.classList.toggle('on', on);
+  }
+  function setBreathHold(on) {
+    on = !!on;
+    if (on && (S.phase !== 'play' || S.o2 <= 0 || S.recovering > 0)) on = false;
+    if (S.holdingBreath === on) { syncBreathUi(); return; }
+    S.holdingBreath = on;
+    syncBreathUi();
+  }
+  function toggleBreathHold() {
+    if (S.phase !== 'play') return;
+    if (!S.holdingBreath && S.recovering > 0) { setMsg('호흡 회복 중 — 잠시 후 다시', 1.5); return; }
+    setBreathHold(!S.holdingBreath);
+  }
+  // 조준 픽셀당 이동량 — 배율/스테이지 배율 보정 + 숨참기 중 감도 저하
+  function aimSens(scale = 1) {
+    return 0.045 * (25 / S.mag) / (S.stageScale || 1) * scale *
+      (breathActive() ? BREATH_AIM_SENS : 1);
   }
 
   /* ---------------- 풍향풍속계 위젯 ---------------- */
@@ -992,6 +1022,7 @@
       `윈디지 <b>${fmt(S.dial.wind * 0.1, 1)} mil</b> (←→)<br>` +
       `산소 <span class="meter o2"><i style="width:${S.o2}%"></i></span> <span class="${o2Cls}">${fmt(S.o2, 0)}%</span> · ` +
       `심박 <span class="meter hr"><i style="width:${clamp((S.heartRate - 50) / 80 * 100, 0, 100)}%"></i></span> ${fmt(S.heartRate, 0)}` +
+      (breathActive() ? '<br><span class="warn">숨참기 ON — 조준 감도 저하 (Shift로 해제)</span>' : '') +
       (S.recovering > 0 ? '<br><span class="bad">호흡 회복 중 — 조준 불안정!</span>' : '');
 
     // 모바일 상단 정보바
@@ -2671,8 +2702,8 @@
   }
   function updateHelpText() {
     $('hud-help').innerHTML = S.controlMode === 'drag'
-      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석'
-      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨 참기 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석';
+      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨참기 토글 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석'
+      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨참기 토글 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석';
     const lk = $('tgl-look'); if (lk) lk.checked = S.controlMode === 'look';
   }
 
@@ -2693,7 +2724,7 @@
   });
   document.addEventListener('mousemove', e => {
     if (S.phase !== 'play' || S.controlMode !== 'look' || !S.pointerLocked) return;
-    const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
+    const sens = aimSens();
     const L = aimLimits(S.mag);
     S.aim.yaw = clamp(S.aim.yaw + e.movementX * sens, L.yawMin, L.yawMax);
     S.aim.pitch = clamp(S.aim.pitch - e.movementY * sens, L.pitMin, L.pitMax);
@@ -2785,7 +2816,7 @@
     const dx = e.clientX - dragState.lastX, dy = e.clientY - dragState.lastY;
     dragState.lastX = e.clientX; dragState.lastY = e.clientY;
     if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > DRAG_THRESHOLD) dragState.moved = true;
-    const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1);
+    const sens = aimSens();
     const L = aimLimits(S.mag);
     S.aim.yaw = clamp(S.aim.yaw + dx * sens, L.yawMin, L.yawMax);
     S.aim.pitch = clamp(S.aim.pitch - dy * sens, L.pitMin, L.pitMax);
@@ -2811,16 +2842,13 @@
       case 'ArrowDown': S.dial.elev--; playClick(); e.preventDefault(); break;
       case 'ArrowRight': S.dial.wind++; playClick(); e.preventDefault(); break;
       case 'ArrowLeft': S.dial.wind--; playClick(); e.preventDefault(); break;
-      case 'ShiftLeft': case 'ShiftRight': S.holdingBreath = true; break;
+      case 'ShiftLeft': case 'ShiftRight': if (!e.repeat) toggleBreathHold(); break;
       case 'KeyM': backToMenu(); break;
       case 'KeyA': runAnalysis(); break;
       case 'KeyC': setControlMode(S.controlMode === 'drag' ? 'look' : 'drag'); break;
       case 'KeyV': cycleRetStyle(); break;  // 데스크톱은 플레이 중 설정에 못 들어간다
     }
     S.lastHudUpdate = 0;
-  });
-  window.addEventListener('keyup', e => {
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') S.holdingBreath = false;
   });
 
   /* ---------------- 토글 스위치 (우하단 스택) ---------------- */
@@ -3020,6 +3048,8 @@
   /* ── 가로 모바일: 숨참기/발사 플로팅 버튼 (기존 유지) ── */
   {
     const bBtn = $('btn-breath');
+    /* 토글식: 짧게 탭하면 숨참기 on/off. 버튼 위에서 드래그하면 (토글 상태와 무관하게)
+     * 조준을 미세 이동한다 — 드래그로 끝난 제스처는 토글하지 않는다. */
     let holdPt = null;
     bBtn.addEventListener('pointerdown', e => {
       e.preventDefault();
@@ -3027,28 +3057,26 @@
       audio() && AC.state === 'suspended' && AC.resume();
       startWindAmbience();
       bBtn.setPointerCapture && bBtn.setPointerCapture(e.pointerId);
-      S.fireHold = true;
-      S.holdingBreath = true;
-      bBtn.classList.add('on');
-      holdPt = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      holdPt = { id: e.pointerId, x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, moved: false };
     });
     bBtn.addEventListener('pointermove', e => {
       if (!holdPt || e.pointerId !== holdPt.id || S.phase !== 'play') return;
-      const sens = 0.045 * (25 / S.mag) / (S.stageScale || 1) * 0.35;
+      if (Math.hypot(e.clientX - holdPt.startX, e.clientY - holdPt.startY) > DRAG_THRESHOLD) holdPt.moved = true;
+      const sens = aimSens(0.35);
       const L = aimLimits(S.mag);
       S.aim.yaw = clamp(S.aim.yaw + (e.clientX - holdPt.x) * sens, L.yawMin, L.yawMax);
       S.aim.pitch = clamp(S.aim.pitch - (e.clientY - holdPt.y) * sens, L.pitMin, L.pitMax);
       holdPt.x = e.clientX; holdPt.y = e.clientY;
     });
-    const releaseBreath = e => {
-      if (!holdPt || (e && e.pointerId !== holdPt.id)) return;
+    bBtn.addEventListener('pointerup', e => {
+      if (!holdPt || e.pointerId !== holdPt.id) return;
+      const wasTap = !holdPt.moved;
       holdPt = null;
-      S.fireHold = false;
-      S.holdingBreath = false;
-      bBtn.classList.remove('on');
-    };
-    bBtn.addEventListener('pointerup', releaseBreath);
-    bBtn.addEventListener('pointercancel', releaseBreath);
+      if (wasTap) toggleBreathHold();
+    });
+    bBtn.addEventListener('pointercancel', e => {
+      if (holdPt && e.pointerId === holdPt.id) holdPt = null;
+    });
     bBtn.addEventListener('contextmenu', e => e.preventDefault());
 
     const fBtn = $('btn-fire');
@@ -3079,19 +3107,13 @@
 
     // 숨참기 (패널)
     const pb = $('p-breath');
-    pb.addEventListener('pointerdown', e => {
+    pb.addEventListener('pointerdown', e => {   // 토글식 — 한 번 눌러 켜고 다시 눌러 끈다
       e.preventDefault();
       if (S.phase !== 'play') return;
       audio() && AC.state === 'suspended' && AC.resume();
       startWindAmbience();
-      pb.setPointerCapture && pb.setPointerCapture(e.pointerId);
-      S.fireHold = true;
-      S.holdingBreath = true;
-      pb.classList.add('on');
+      toggleBreathHold();
     });
-    const pbEnd = () => { S.fireHold = false; S.holdingBreath = false; pb.classList.remove('on'); };
-    pb.addEventListener('pointerup', pbEnd);
-    pb.addEventListener('pointercancel', pbEnd);
     pb.addEventListener('contextmenu', e => e.preventDefault());
 
     // 방아쇠 슬라이더: 아래로 당겨 빨간 선을 넘기면 격발
