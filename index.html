@@ -91,17 +91,17 @@
   <!-- 도움말 (게임 시작 시 updateHelpText()가 조준 방식에 맞춰 덮어씀) -->
   <div id="hud-help" class="hud">
     드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 조정 · 링(9~6시) 드래그/휠: 배율 ·
-    Shift: 숨 참기 · M: 메뉴 · A: 명중률 분석
+    Shift: 숨참기 토글 · M: 메뉴 · A: 명중률 분석
   </div>
 </div><!-- /#stage -->
 
-  <!-- 모바일 터치 컨트롤: 좌 = 숨참기(옵션: 토글형/홀드형), 우 = 발사 -->
+  <!-- 모바일 터치 컨트롤: 좌 = 숨참기(옵션: 토글형/홀드형, 버튼 위 드래그로 조준), 우 = 발사 -->
   <div id="touch-bar" class="hidden">
     <div id="tb-vitals" class="tb-vitals">
       <div id="tb-hr" class="tb-hr">♥ 70</div>
       <div class="tb-o2"><i id="tb-o2fill"></i></div>
     </div>
-    <button id="btn-breath" class="tc-btn hold">숨참기<br><span id="btn-breath-sub">꾹+드래그</span></button>
+    <button id="btn-breath" class="tc-btn hold">숨참기<br><span id="btn-breath-sub">탭: 켜기/끄기</span></button>
     <button id="btn-fire" class="tc-btn fire">발사</button>
   </div>
 
@@ -206,8 +206,8 @@
         <input type="checkbox" id="set-hl" checked></label>
       <label class="set-row" id="set-look-row"><span>마우스룩 조준<br><small>데스크톱: 클릭해 포인터 잠금 후 마우스로 조준</small></span>
         <input type="checkbox" id="set-look"></label>
-      <label class="set-row" id="set-breathtgl-row"><span>숨참기 토글형<br><small>모바일: 켜면 탭 한 번으로 숨참기 켬/끔 · 끄면 꾹 누르는 동안 유지(누른 채 드래그로 조준). 숨참기 시간이 끝나면 둘 다 자동 해제</small></span>
-        <input type="checkbox" id="set-breathtgl"></label>
+      <label class="set-row" id="set-breathtgl-row"><span>숨참기 토글형<br><small>모바일: 켜면 탭 한 번으로 숨참기 켬/끔 · 끄면 꾹 누르는 동안만 유지. 둘 다 버튼 위 드래그로 조준하고, 숨참기 시간이 끝나면 자동 해제</small></span>
+        <input type="checkbox" id="set-breathtgl" checked></label>
       <label class="set-row"><span>사운드<br><small>총성·터렛 클릭·바람 소리</small></span>
         <input type="checkbox" id="set-sound" checked></label>
       <div class="set-row set-choice"><span>레티클 색상<br><small>조준선 색 — 어두운 배경에서는 밝은 색이 잘 보인다 (플레이 중 V 키로도 전환)</small></span>

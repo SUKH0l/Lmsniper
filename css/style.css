@@ -349,7 +349,7 @@ html, body {
 /* 발사 버튼 (새 단일 버튼) */
 .tc-btn.fire span { font-size: 10px; font-weight: 400; color: #ffd0c8; }
 
-/* 모바일 터치 버튼: 좌 = 숨참기(조준 드래그), 우 = 발사 */
+/* 모바일 터치 버튼: 좌 = 숨참기 토글(버튼 위 드래그로 조준), 우 = 발사 */
 #touch-bar .tc-btn.hold {
   position: absolute; left: 22px; bottom: 26px;
   width: 104px; height: 104px; border-radius: 50%;
@@ -357,7 +357,11 @@ html, body {
   font-size: 15px;
 }
 #touch-bar .tc-btn.hold span { font-size: 10px; font-weight: 400; color: #a9d6e6; }
-#touch-bar .tc-btn.hold:active, #touch-bar .tc-btn.hold.on { background: rgba(40, 110, 150, 0.92); }
+#touch-bar .tc-btn.hold.on {
+  background: rgba(40, 110, 150, 0.92);
+  border-color: #8fe3ff; color: #fff;
+  box-shadow: 0 0 0 2px rgba(143, 227, 255, 0.55), 0 0 16px rgba(79, 183, 209, 0.6);
+}
 #touch-bar .tc-btn.fire {
   position: absolute; right: 22px; bottom: 26px;
   width: 104px; height: 104px;
@@ -501,7 +505,11 @@ body.has-nav #mnav ~ .overlay { padding-bottom: 64px; }
   background: rgba(20, 50, 70, 0.8); border: 2px solid #4fb7d1; color: #d8f0f8;
   font-size: 14px; font-weight: 700; touch-action: none;
 }
-.p-breath.on { background: rgba(40, 110, 150, 0.95); }
+.p-breath.on {
+  background: rgba(40, 110, 150, 0.95);
+  border-color: #8fe3ff; color: #fff;
+  box-shadow: 0 0 0 2px rgba(143, 227, 255, 0.55), 0 0 14px rgba(79, 183, 209, 0.6);
+}
 .p-vitals { font-size: 14px; color: #eaf6ec; font-weight: 700; font-variant-numeric: tabular-nums; }
 .p-vitals small { color: var(--dim); font-weight: 400; }
 .p-o2 { width: 90%; height: 8px; border-radius: 4px; background: #16211a; overflow: hidden; }
