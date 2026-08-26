@@ -1023,7 +1023,7 @@
       `윈디지 <b>${fmt(S.dial.wind * 0.1, 1)} mil</b> (←→)<br>` +
       `산소 <span class="meter o2"><i style="width:${S.o2}%"></i></span> <span class="${o2Cls}">${fmt(S.o2, 0)}%</span> · ` +
       `심박 <span class="meter hr"><i style="width:${clamp((S.heartRate - 50) / 80 * 100, 0, 100)}%"></i></span> ${fmt(S.heartRate, 0)}` +
-      (breathActive() ? '<br><span class="warn">숨참기 ON — 조준 감도 저하 (Shift로 해제)</span>' : '') +
+      (breathActive() ? `<br><span class="warn">숨참기 ON — 조준 감도 저하 ${S.breathToggle ? '(Shift로 해제)' : '(Shift에서 손 떼면 해제)'}</span>` : '') +
       (S.recovering > 0 ? '<br><span class="bad">호흡 회복 중 — 조준 불안정!</span>' : '');
 
     // 모바일 상단 정보바
@@ -2708,8 +2708,8 @@
   }
   function updateHelpText() {
     $('hud-help').innerHTML = S.controlMode === 'drag'
-      ? '드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨참기 토글 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석'
-      : '클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨참기 토글 · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석';
+      ? `드래그: 조준 · 짧게 클릭: 발사 · 노브 드래그/터치: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨참기${S.breathToggle ? ' 토글' : '(홀드)'} · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석`
+      : `클릭: 조준 잠금/발사 · ↑↓←→: 터렛 · 링(9~6시) 드래그/휠: 배율 · Shift: 숨참기${S.breathToggle ? ' 토글' : '(홀드)'} · V: 레티클 색상 · M: 메뉴 · A: 명중률 분석`;
     const lk = $('tgl-look'); if (lk) lk.checked = S.controlMode === 'look';
   }
 
@@ -2848,13 +2848,22 @@
       case 'ArrowDown': S.dial.elev--; playClick(); e.preventDefault(); break;
       case 'ArrowRight': S.dial.wind++; playClick(); e.preventDefault(); break;
       case 'ArrowLeft': S.dial.wind--; playClick(); e.preventDefault(); break;
-      case 'ShiftLeft': case 'ShiftRight': if (!e.repeat) toggleBreathHold(); break;
+      case 'ShiftLeft': case 'ShiftRight':
+        if (e.repeat) break;
+        if (S.breathToggle) toggleBreathHold();  // 토글형: 한 번 눌러 켬/끔
+        else setBreathHold(true);                // 홀드형: 누르는 동안 켬
+        break;
       case 'KeyM': backToMenu(); break;
       case 'KeyA': runAnalysis(); break;
       case 'KeyC': setControlMode(S.controlMode === 'drag' ? 'look' : 'drag'); break;
       case 'KeyV': cycleRetStyle(); break;  // 데스크톱은 플레이 중 설정에 못 들어간다
     }
     S.lastHudUpdate = 0;
+  });
+  window.addEventListener('keyup', e => {
+    if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !S.breathToggle) {
+      setBreathHold(false);   // 홀드형: 떼면 끔
+    }
   });
 
   /* ---------------- 토글 스위치 (우하단 스택) ---------------- */
@@ -2892,7 +2901,7 @@
     document.body.classList.toggle('has-nav', navShow);
     $('tgl-look-row').classList.toggle('hidden', !!coarse);
     const slr = $('set-look-row'); if (slr) slr.classList.toggle('hidden', !!coarse);
-    const sbr = $('set-breathtgl-row'); if (sbr) sbr.classList.toggle('hidden', !coarse); // 모바일 전용 옵션
+    // 숨참기 토글형 옵션은 데스크톱(Shift)·모바일(버튼) 공통이라 항상 표시
     applyDopePanel();
   }
 
@@ -3058,6 +3067,7 @@
     S.breathToggle = e.target.checked;
     setBreathHold(false);   // 방식 전환 시 켜져 있던 숨참기는 해제
     applyBreathMode();
+    updateHelpText();       // Shift 도움말 문구도 방식에 맞게 갱신
     saveSettings();
   });
 
